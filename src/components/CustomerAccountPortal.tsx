@@ -1,12 +1,27 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
 import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  sendEmailVerification,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut,
+  updateProfile,
+  type User,
+} from 'firebase/auth';
+import {
+  ArrowLeft,
   ArrowRight,
   Check,
   CheckCircle2,
+  Eye,
+  EyeOff,
   Loader2,
   LogOut,
+  MailCheck,
   MessageSquare,
+  RefreshCw,
   Save,
   User as UserIcon,
 } from 'lucide-react';
@@ -25,6 +40,12 @@ import {
 import type { AppRoute } from '../types/routes';
 import { formatConfirmationTimestamp } from '../utils/bookingConfirmation';
 import { formatBookingDate } from '../utils/bookingDates';
+import {
+  mapFirebaseAuthError,
+  validateEmailAuthInput,
+  type EmailAuthMode,
+  type EmailAuthValidationErrors,
+} from '../utils/customerAuth';
 import { BookingMessagesPanel } from './BookingMessagesPanel';
 
 interface CustomerAccountPortalProps {
@@ -54,9 +75,24 @@ export function CustomerAccountPortal({
   onNavigate,
 }: CustomerAccountPortalProps) {
   const [user, setUser] = useState<User | null>(null);
+  const [emailVerified, setEmailVerified] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
   const [authError, setAuthError] = useState('');
+  const [authNotice, setAuthNotice] = useState('');
+
+  // Email & password form state
+  const [authMode, setAuthMode] = useState<EmailAuthMode>('signin');
+  const [authName, setAuthName] = useState('');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authConfirmPassword, setAuthConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<EmailAuthValidationErrors>({});
+
+  // Email verification screen actions
+  const [checkingVerification, setCheckingVerification] = useState(false);
+  const [resendingVerification, setResendingVerification] = useState(false);
 
   const [activeTab, setActiveTab] = useState<'bookings' | 'profile'>('bookings');
   const [bookings, setBookings] = useState<BookingRecord[]>([]);
@@ -75,6 +111,7 @@ export function CustomerAccountPortal({
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (nextUser) => {
       setUser(nextUser);
+      setEmailVerified(Boolean(nextUser?.emailVerified));
       setAuthReady(true);
       setAuthError('');
     });
@@ -82,7 +119,7 @@ export function CustomerAccountPortal({
   }, []);
 
   useEffect(() => {
-    if (!authReady || !user || !user.email) {
+    if (!authReady || !user || !user.email || !emailVerified) {
       setBookings([]);
       setAccount(null);
       return;
@@ -117,25 +154,137 @@ export function CustomerAccountPortal({
       unsubBookings();
       unsubAccount();
     };
-  }, [authReady, user]);
+  }, [authReady, user, emailVerified]);
+
+  const switchAuthMode = (nextMode: EmailAuthMode) => {
+    setAuthMode(nextMode);
+    setAuthError('');
+    setAuthNotice('');
+    setFieldErrors({});
+  };
+
+  const handleEmailAuthSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthNotice('');
+
+    const validation = validateEmailAuthInput(authMode, {
+      fullName: authName,
+      email: authEmail,
+      password: authPassword,
+      confirmPassword: authConfirmPassword,
+    });
+
+    if (!validation.valid) {
+      setFieldErrors(validation.errors);
+      return;
+    }
+
+    setFieldErrors({});
+    setSigningIn(true);
+
+    try {
+      if (authMode === 'signup') {
+        const credential = await createUserWithEmailAndPassword(
+          auth,
+          validation.normalizedEmail,
+          authPassword,
+        );
+        if (validation.trimmedName) {
+          await updateProfile(credential.user, { displayName: validation.trimmedName });
+        }
+        try {
+          await sendEmailVerification(credential.user);
+          setAuthNotice(
+            `Verification link sent to ${validation.normalizedEmail}. Open it to unlock your repairs and messages.`,
+          );
+        } catch {
+          setAuthNotice(
+            'Account created! Click "Resend Verification Email" below if you do not see the verification email.',
+          );
+        }
+        setAuthPassword('');
+        setAuthConfirmPassword('');
+      } else if (authMode === 'signin') {
+        const credential = await signInWithEmailAndPassword(
+          auth,
+          validation.normalizedEmail,
+          authPassword,
+        );
+        setEmailVerified(Boolean(credential.user.emailVerified));
+        setAuthPassword('');
+      } else {
+        await sendPasswordResetEmail(auth, validation.normalizedEmail);
+        setAuthNotice(
+          `Password reset link sent to ${validation.normalizedEmail}. Check your inbox and spam folder.`,
+        );
+      }
+    } catch (err) {
+      setAuthError(mapFirebaseAuthError(err));
+    } finally {
+      setSigningIn(false);
+    }
+  };
 
   const handleGoogleSignIn = async () => {
     setSigningIn(true);
     setAuthError('');
+    setAuthNotice('');
     try {
-      await signInWithPopup(auth, googleProvider);
+      const credential = await signInWithPopup(auth, googleProvider);
+      setEmailVerified(Boolean(credential.user.emailVerified));
     } catch (err) {
-      setAuthError(
-        err instanceof Error ? err.message : 'Sign-in was cancelled or blocked by your browser.',
-      );
+      setAuthError(mapFirebaseAuthError(err));
     } finally {
       setSigningIn(false);
+    }
+  };
+
+  const handleCheckVerification = async () => {
+    const current = auth.currentUser;
+    if (!current) return;
+    setCheckingVerification(true);
+    setAuthError('');
+    setAuthNotice('');
+    try {
+      await current.reload();
+      await current.getIdToken(true);
+      const isNowVerified = Boolean(auth.currentUser?.emailVerified);
+      setEmailVerified(isNowVerified);
+      if (!isNowVerified) {
+        setAuthNotice(
+          `We haven't seen verification for ${current.email} yet. Click the link in your inbox (check spam/junk) and tap Continue again.`,
+        );
+      }
+    } catch (err) {
+      setAuthError(mapFirebaseAuthError(err));
+    } finally {
+      setCheckingVerification(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    const current = auth.currentUser;
+    if (!current) return;
+    setResendingVerification(true);
+    setAuthError('');
+    setAuthNotice('');
+    try {
+      await sendEmailVerification(current);
+      setAuthNotice(`Fresh verification email sent to ${current.email}. Check your inbox or spam folder.`);
+    } catch (err) {
+      setAuthError(mapFirebaseAuthError(err));
+    } finally {
+      setResendingVerification(false);
     }
   };
 
   const handleSignOut = async () => {
     await signOut(auth);
     setSelectedBookingId(null);
+    setEmailVerified(false);
+    setAuthNotice('');
+    setAuthError('');
   };
 
   const handleSaveProfile = async (e: FormEvent) => {
@@ -174,9 +323,9 @@ export function CustomerAccountPortal({
 
   if (!user) {
     return (
-      <section aria-labelledby="account-signin-heading" className="py-16 sm:py-24">
+      <section aria-labelledby="account-signin-heading" className="py-12 sm:py-20">
         <div className="max-w-xl mx-auto px-5">
-          <div className="rounded-[24px] bg-[#F4F4F0] text-[#121214] p-7 sm:p-10 border border-black/10 space-y-6">
+          <div className="rounded-[24px] bg-[#F4F4F0] text-[#121214] p-6 sm:p-9 border border-black/10 space-y-6">
             <div className="space-y-2">
               <div className="font-mono text-xs text-[#52525B]">
                 RIDER ACCOUNT · UPDATES &amp; DIRECT MESSAGING
@@ -185,25 +334,76 @@ export function CustomerAccountPortal({
                 Track your scooter repairs &amp; message your mechanic.
               </h1>
               <p className="text-sm text-[#3F3F46] leading-relaxed">
-                Sign in with the same email you used when booking to view live repair status,
-                confirmation updates, and direct messages with {settings.businessName}.
+                Create an account or sign in with <strong>any email address</strong> (iCloud,
+                Outlook, Yahoo, Gmail, or work email) matching your booking to view live repair
+                status and message {settings.businessName}.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-[#27272A]">
-              <div className="rounded-[12px] bg-white p-3.5 border border-black/10 space-y-1">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs text-[#27272A]">
+              <div className="rounded-[12px] bg-white p-3 border border-black/10 space-y-1">
                 <div className="font-mono font-semibold text-[#121214]">01 · LIVE STATUS</div>
                 <p>See when your visit is confirmed, in progress, or completed.</p>
               </div>
-              <div className="rounded-[12px] bg-white p-3.5 border border-black/10 space-y-1">
+              <div className="rounded-[12px] bg-white p-3 border border-black/10 space-y-1">
                 <div className="font-mono font-semibold text-[#121214]">02 · DIRECT CHAT</div>
                 <p>Share gate codes, parking notes, or questions directly with the shop.</p>
               </div>
-              <div className="rounded-[12px] bg-white p-3.5 border border-black/10 space-y-1">
+              <div className="rounded-[12px] bg-white p-3 border border-black/10 space-y-1">
                 <div className="font-mono font-semibold text-[#121214]">03 · SAVED SCOOTER</div>
                 <p>Save your phone, address, and scooter model for faster booking.</p>
               </div>
             </div>
+
+            {authMode !== 'reset' ? (
+              <div
+                role="tablist"
+                aria-label="Account authentication mode"
+                className="grid grid-cols-2 gap-1 p-1 rounded-[12px] bg-black/6 border border-black/8"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={authMode === 'signin'}
+                  onClick={() => switchAuthMode('signin')}
+                  className={`min-h-[40px] rounded-[9px] text-xs font-semibold transition-colors cursor-pointer ${
+                    authMode === 'signin'
+                      ? 'bg-[#121214] text-[#F4F4F0]'
+                      : 'text-[#52525B] hover:text-[#121214]'
+                  }`}
+                >
+                  Sign In
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={authMode === 'signup'}
+                  onClick={() => switchAuthMode('signup')}
+                  className={`min-h-[40px] rounded-[9px] text-xs font-semibold transition-colors cursor-pointer ${
+                    authMode === 'signup'
+                      ? 'bg-[#121214] text-[#F4F4F0]'
+                      : 'text-[#52525B] hover:text-[#121214]'
+                  }`}
+                >
+                  Create Account
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-2 border-b border-black/10 pb-3">
+                <div>
+                  <div className="font-mono text-[11px] text-[#52525B]">PASSWORD RECOVERY</div>
+                  <h2 className="text-base font-semibold text-[#121214]">Reset your password</h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => switchAuthMode('signin')}
+                  className="text-xs font-semibold text-[#52525B] hover:text-[#121214] inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" />
+                  Back to Sign In
+                </button>
+              </div>
+            )}
 
             {authError && (
               <p
@@ -214,24 +414,266 @@ export function CustomerAccountPortal({
               </p>
             )}
 
-            <div className="flex flex-wrap items-center gap-3">
+            {authNotice && (
+              <p
+                role="status"
+                className="rounded-[10px] bg-emerald-50 border border-emerald-200 px-4 py-3 text-xs font-medium text-emerald-900"
+              >
+                {authNotice}
+              </p>
+            )}
+
+            <form onSubmit={handleEmailAuthSubmit} noValidate className="space-y-3.5">
+              {authMode === 'signup' && (
+                <div className="space-y-1">
+                  <label htmlFor="auth-name" className="block text-xs font-semibold text-[#27272A]">
+                    Full Name
+                  </label>
+                  <input
+                    id="auth-name"
+                    type="text"
+                    autoComplete="name"
+                    value={authName}
+                    onChange={(e) => setAuthName(e.target.value)}
+                    placeholder="Alex Rivera"
+                    aria-invalid={Boolean(fieldErrors.fullName)}
+                    className="w-full min-h-[44px] px-3.5 rounded-[10px] bg-white border border-black/15 text-sm text-[#121214] placeholder:text-[#71717A]"
+                  />
+                  {fieldErrors.fullName && (
+                    <p role="alert" className="text-xs font-medium text-[#C82A14]">
+                      {fieldErrors.fullName}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <label htmlFor="auth-email" className="block text-xs font-semibold text-[#27272A]">
+                  Email Address
+                </label>
+                <input
+                  id="auth-email"
+                  type="email"
+                  autoComplete="email"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  aria-invalid={Boolean(fieldErrors.email)}
+                  className="w-full min-h-[44px] px-3.5 rounded-[10px] bg-white border border-black/15 text-sm text-[#121214] placeholder:text-[#71717A]"
+                />
+                {fieldErrors.email && (
+                  <p role="alert" className="text-xs font-medium text-[#C82A14]">
+                    {fieldErrors.email}
+                  </p>
+                )}
+              </div>
+
+              {authMode !== 'reset' && (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <label
+                      htmlFor="auth-password"
+                      className="block text-xs font-semibold text-[#27272A]"
+                    >
+                      Password
+                    </label>
+                    {authMode === 'signin' && (
+                      <button
+                        type="button"
+                        onClick={() => switchAuthMode('reset')}
+                        className="text-xs font-semibold text-[#E8452C] hover:underline cursor-pointer"
+                      >
+                        Forgot password?
+                      </button>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <input
+                      id="auth-password"
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
+                      value={authPassword}
+                      onChange={(e) => setAuthPassword(e.target.value)}
+                      placeholder={
+                        authMode === 'signup' ? 'At least 6 characters' : 'Enter your password'
+                      }
+                      aria-invalid={Boolean(fieldErrors.password)}
+                      className="w-full min-h-[44px] pl-3.5 pr-11 rounded-[10px] bg-white border border-black/15 text-sm text-[#121214] placeholder:text-[#71717A]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-[8px] text-[#52525B] hover:text-[#121214] inline-flex items-center justify-center cursor-pointer"
+                    >
+                      {showPassword ? (
+                        <EyeOff className="w-4 h-4" aria-hidden="true" />
+                      ) : (
+                        <Eye className="w-4 h-4" aria-hidden="true" />
+                      )}
+                    </button>
+                  </div>
+                  {fieldErrors.password && (
+                    <p role="alert" className="text-xs font-medium text-[#C82A14]">
+                      {fieldErrors.password}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {authMode === 'signup' && (
+                <div className="space-y-1">
+                  <label
+                    htmlFor="auth-confirm-password"
+                    className="block text-xs font-semibold text-[#27272A]"
+                  >
+                    Confirm Password
+                  </label>
+                  <input
+                    id="auth-confirm-password"
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    value={authConfirmPassword}
+                    onChange={(e) => setAuthConfirmPassword(e.target.value)}
+                    placeholder="Re-enter your password"
+                    aria-invalid={Boolean(fieldErrors.confirmPassword)}
+                    className="w-full min-h-[44px] px-3.5 rounded-[10px] bg-white border border-black/15 text-sm text-[#121214] placeholder:text-[#71717A]"
+                  />
+                  {fieldErrors.confirmPassword && (
+                    <p role="alert" className="text-xs font-medium text-[#C82A14]">
+                      {fieldErrors.confirmPassword}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <button
-                type="button"
-                onClick={handleGoogleSignIn}
+                type="submit"
                 disabled={signingIn}
-                className="min-h-[46px] px-6 py-2.5 rounded-[12px] bg-[#E8452C] hover:bg-[#D53A22] disabled:opacity-60 text-white text-sm font-semibold inline-flex items-center gap-2 cursor-pointer"
+                className="w-full min-h-[46px] px-6 py-2.5 rounded-[12px] bg-[#E8452C] hover:bg-[#D53A22] disabled:opacity-60 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer"
               >
                 {signingIn && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
-                Sign In with Google
+                {authMode === 'signup'
+                  ? 'Create Rider Account'
+                  : authMode === 'signin'
+                    ? 'Sign In with Email'
+                    : 'Send Password Reset Link'}
               </button>
+            </form>
+
+            {authMode !== 'reset' && (
+              <>
+                <div className="relative flex items-center justify-center">
+                  <div className="w-full border-t border-black/12" aria-hidden="true" />
+                  <span className="bg-[#F4F4F0] px-3 font-mono text-[11px] text-[#71717A] whitespace-nowrap">
+                    OR CONTINUE WITH
+                  </span>
+                  <div className="w-full border-t border-black/12" aria-hidden="true" />
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleGoogleSignIn}
+                    disabled={signingIn}
+                    className="flex-1 min-h-[44px] px-5 py-2.5 rounded-[12px] bg-white border border-black/15 hover:bg-black/5 disabled:opacity-60 text-sm font-semibold text-[#121214] inline-flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  >
+                    Continue with Google
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('/book')}
+                    className="min-h-[44px] px-4 py-2.5 rounded-[12px] border border-black/15 hover:bg-black/5 text-sm font-semibold text-[#121214] inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    Book a Repair First
+                    <ArrowRight className="w-4 h-4" aria-hidden="true" />
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (!emailVerified) {
+    return (
+      <section aria-labelledby="verify-email-heading" className="py-16 sm:py-24">
+        <div className="max-w-lg mx-auto px-5">
+          <div className="rounded-[24px] bg-[#F4F4F0] text-[#121214] p-7 sm:p-9 border border-black/10 space-y-6">
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-[12px] bg-[#E8452C]/12 text-[#E8452C] flex items-center justify-center shrink-0">
+                <MailCheck className="w-5 h-5" aria-hidden="true" />
+              </div>
+              <div className="space-y-1.5">
+                <div className="font-mono text-xs text-[#52525B]">EMAIL VERIFICATION REQUIRED</div>
+                <h1 id="verify-email-heading" className="text-2xl font-semibold tracking-tight">
+                  Verify your email to unlock your repairs
+                </h1>
+              </div>
+            </div>
+
+            <p className="text-sm text-[#3F3F46] leading-relaxed">
+              We sent a verification link to <strong>{user.email}</strong>. Confirming your email
+              protects your home address, booking history, and private messages with{' '}
+              {settings.businessName}.
+            </p>
+
+            {authError && (
+              <p
+                role="alert"
+                className="rounded-[10px] bg-[#E8452C]/10 border border-[#E8452C]/35 px-4 py-3 text-xs font-medium text-[#991B1B]"
+              >
+                {authError}
+              </p>
+            )}
+
+            {authNotice && (
+              <p
+                role="status"
+                className="rounded-[10px] bg-white border border-black/12 px-4 py-3 text-xs font-medium text-[#27272A]"
+              >
+                {authNotice}
+              </p>
+            )}
+
+            <div className="space-y-2.5">
               <button
                 type="button"
-                onClick={() => onNavigate('/book')}
-                className="min-h-[46px] px-5 py-2.5 rounded-[12px] border border-black/15 hover:bg-black/5 text-sm font-semibold text-[#121214] inline-flex items-center gap-2 cursor-pointer"
+                onClick={handleCheckVerification}
+                disabled={checkingVerification}
+                className="w-full min-h-[46px] px-5 py-2.5 rounded-[12px] bg-[#E8452C] hover:bg-[#D53A22] disabled:opacity-60 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 cursor-pointer"
               >
-                Book a Repair First
-                <ArrowRight className="w-4 h-4" aria-hidden="true" />
+                {checkingVerification ? (
+                  <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <RefreshCw className="w-4 h-4" aria-hidden="true" />
+                )}
+                I&apos;ve Verified My Email — Continue
               </button>
+
+              <div className="flex flex-col sm:flex-row gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleResendVerification}
+                  disabled={resendingVerification}
+                  className="flex-1 min-h-[42px] px-4 py-2 rounded-[10px] bg-white border border-black/15 hover:bg-black/5 disabled:opacity-60 text-xs font-semibold text-[#121214] inline-flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {resendingVerification && (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                  )}
+                  Resend Verification Email
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  className="min-h-[42px] px-4 py-2 rounded-[10px] border border-black/15 hover:bg-black/5 text-xs font-semibold text-[#52525B] inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
+                  Switch Email
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -378,13 +378,21 @@ export function BookingConsole({
                 <div className="flex items-center gap-2 text-[#27272A]">
                   <UserCircle2 className="w-4 h-4 text-[#E8452C] shrink-0" aria-hidden="true" />
                   {signedInUser?.email ? (
-                    <span>
-                      Signed in as <strong>{signedInUser.email}</strong> — this booking will
-                      automatically appear in My Account for live status updates &amp; messaging.
-                    </span>
+                    signedInUser.emailVerified ? (
+                      <span>
+                        Signed in as <strong>{signedInUser.email}</strong> — this booking will
+                        automatically appear in My Account for live status updates &amp; messaging.
+                      </span>
+                    ) : (
+                      <span>
+                        Signed in as <strong>{signedInUser.email}</strong> — verify your email in
+                        My Account to unlock live repair updates &amp; direct messaging.
+                      </span>
+                    )
                   ) : (
                     <span>
-                      Sign in to track live repair updates &amp; message your mechanic directly.
+                      Sign in or create an account with any email to track live repair updates
+                      &amp; message your mechanic directly.
                     </span>
                   )}
                 </div>

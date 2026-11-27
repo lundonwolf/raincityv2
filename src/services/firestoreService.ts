@@ -431,7 +431,7 @@ export async function createPublicBooking(payload: CreateBookingPayload): Promis
   const docBody: Record<string, unknown> = {
     referenceId: trimStr(payload.referenceId.toUpperCase(), 32),
     riderName: trimStr(payload.riderName, 100),
-    contactEmail: trimStr(payload.contactEmail, 120),
+    contactEmail: trimStr(payload.contactEmail.toLowerCase(), 120),
     contactPhone: trimStr(payload.contactPhone, 32),
     scooterModel: trimStr(payload.scooterModel, 120),
     address: trimStr(payload.address, 200),
