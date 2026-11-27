@@ -62,7 +62,13 @@ export interface SiteSettings {
   footerNote: string;
 }
 
-export type BookingStatus = 'new' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled';
+export type BookingStatus =
+  | 'new'
+  | 'confirmed'
+  | 'in_progress'
+  | 'ongoing'
+  | 'completed'
+  | 'cancelled';
 
 export interface BookingRecord {
   id: string;
@@ -73,6 +79,7 @@ export interface BookingRecord {
   scooterModel: string;
   address: string;
   preferredDay: OperatingDay;
+  bookingDate?: string;
   preferredWindow: TimeWindow;
   serviceIds: string[];
   serviceTitles: string[];

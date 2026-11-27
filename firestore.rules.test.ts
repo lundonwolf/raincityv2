@@ -67,4 +67,9 @@ test('Dirty Dozen security invariants are enforced in Firestore rules', () => {
   assert.match(rules, /match \/messages\/\{messageId\}[\s\S]*allow list: if isMessageOwner\(resource\.data\) \|\| isAdmin\(\);/);
   assert.ok(rules.includes("incoming().senderRole == 'customer'"));
   assert.ok(rules.includes("incoming().messageType == 'chat'"));
+
+  // 13. Ongoing status and YYYY-MM-DD bookingDate format are strictly validated
+  assert.ok(rules.includes("'ongoing'"));
+  assert.ok(rules.includes("'bookingDate'"));
+  assert.ok(rules.includes("function isValidDateKey("));
 });

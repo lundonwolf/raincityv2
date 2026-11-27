@@ -1,4 +1,5 @@
 import type { BookingRecord, SiteSettings } from '../data/scooterData';
+import { formatBookingDate } from './bookingDates';
 
 export interface ConfirmationMessageBundle {
   subject: string;
@@ -23,6 +24,7 @@ export function buildBookingConfirmationBundle(
   const cleanNote = customNote.trim();
   const servicesList =
     booking.serviceTitles.length > 0 ? booking.serviceTitles.join(', ') : 'Mobile Scooter Service';
+  const dateDisplay = formatBookingDate(booking.bookingDate, booking.preferredDay);
 
   const subject = `Booking Confirmed · ${booking.referenceId} · ${settings.businessName}`;
 
@@ -32,7 +34,7 @@ export function buildBookingConfirmationBundle(
     `Your mobile scooter repair appointment with ${settings.businessName} is confirmed!`,
     '',
     `Booking Reference: ${booking.referenceId}`,
-    `Scheduled Window: ${booking.preferredDay} · ${booking.preferredWindow}`,
+    `Scheduled Date & Window: ${dateDisplay} · ${booking.preferredWindow}`,
     `Service Address: ${booking.address}`,
     `Scooter: ${booking.scooterModel}`,
     `Requested Work: ${servicesList}`,
@@ -57,7 +59,7 @@ export function buildBookingConfirmationBundle(
   const emailBody = emailLines.join('\n');
 
   const smsParts = [
-    `${settings.businessName}: Hi ${booking.riderName}, your mobile repair (${booking.referenceId}) for your ${booking.scooterModel} is CONFIRMED for ${booking.preferredDay}, ${booking.preferredWindow} at ${booking.address}.`,
+    `${settings.businessName}: Hi ${booking.riderName}, your mobile repair (${booking.referenceId}) for your ${booking.scooterModel} is CONFIRMED for ${dateDisplay}, ${booking.preferredWindow} at ${booking.address}.`,
     `Est. labor: ${booking.estimatedLaborLabel} ($0 travel fee).`,
   ];
   if (cleanNote) {

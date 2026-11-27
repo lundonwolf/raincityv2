@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
 import {
+  Calendar,
   Check,
   Loader2,
   LogOut,
@@ -32,6 +33,7 @@ import { auth, BOOTSTRAPPED_ADMIN_EMAILS, googleProvider } from '../lib/firebase
 import {
   checkIsAdminDocument,
   deleteAdminBooking,
+  deleteAdminBookingsBulk,
   deleteAdminCustomer,
   deleteServiceItem,
   markBookingConfirmationSent,
@@ -51,12 +53,14 @@ import {
 } from '../services/mailService';
 import type { AppRoute } from '../types/routes';
 import { formatConfirmationTimestamp } from '../utils/bookingConfirmation';
+import { formatBookingDate, getOperatingDayFromDateKey } from '../utils/bookingDates';
 import {
   deriveCustomersFromBookings,
   formatServicePrice,
   type AggregatedCustomer,
 } from '../utils/repairCalculator';
 import { AdminAnalyticsPanel } from './AdminAnalyticsPanel';
+import { AdminCalendarPanel } from './AdminCalendarPanel';
 import { AdminImportPanel } from './AdminImportPanel';
 import { AdminSiteEditor } from './AdminSiteEditor';
 import { BookingConfirmationModal } from './BookingConfirmationModal';
@@ -68,12 +72,13 @@ interface AdminConsoleProps {
   onNavigate: (route: AppRoute) => void;
 }
 
-type AdminTab = 'bookings' | 'analytics' | 'customers' | 'site' | 'import';
+type AdminTab = 'bookings' | 'calendar' | 'analytics' | 'customers' | 'site' | 'import';
 
 const BOOKING_STATUSES: BookingStatus[] = [
   'new',
   'confirmed',
   'in_progress',
+  'ongoing',
   'completed',
   'cancelled',
 ];
@@ -82,6 +87,7 @@ const STATUS_LABELS: Record<BookingStatus, string> = {
   new: 'New',
   confirmed: 'Confirmed',
   in_progress: 'In Progress',
+  ongoing: 'Ongoing',
   completed: 'Completed',
   cancelled: 'Cancelled',
 };
@@ -108,20 +114,29 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
   const [savingConfirmation, setSavingConfirmation] = useState(false);
   const [confirmDeleteBookingId, setConfirmDeleteBookingId] = useState<string | null>(null);
+  const [selectedBookingIds, setSelectedBookingIds] = useState<string[]>([]);
+  const [confirmBulkDeleteBookings, setConfirmBulkDeleteBookings] = useState(false);
+  const [bulkDeletingBookings, setBulkDeletingBookings] = useState(false);
   const [savingBooking, setSavingBooking] = useState(false);
 
-  // Customers CRM editor state
+  // Customers CRM editor & deletion state
   const [customerSearch, setCustomerSearch] = useState('');
   const [editingCustomer, setEditingCustomer] = useState<
     Omit<CustomerProfileRecord, 'updatedAtIso'> | null
   >(null);
   const [savingCustomer, setSavingCustomer] = useState(false);
+  const [confirmDeleteCustomerKey, setConfirmDeleteCustomerKey] = useState<string | null>(null);
+  const [deletingCustomerKey, setDeletingCustomerKey] = useState<string | null>(null);
+  const [selectedCustomerKeys, setSelectedCustomerKeys] = useState<string[]>([]);
+  const [confirmBulkDeleteCustomers, setConfirmBulkDeleteCustomers] = useState(false);
+  const [bulkDeletingCustomers, setBulkDeletingCustomers] = useState(false);
 
   // Site settings & service pricing editor state
   const [savingSettings, setSavingSettings] = useState(false);
   const [editingService, setEditingService] = useState<ScooterService | null>(null);
   const [includesDraftText, setIncludesDraftText] = useState('');
   const [savingService, setSavingService] = useState(false);
+  const [confirmDeleteServiceId, setConfirmDeleteServiceId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (nextUser) => {
@@ -240,6 +255,7 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
         contactPhone: editingBooking.contactPhone,
         scooterModel: editingBooking.scooterModel,
         address: editingBooking.address,
+        bookingDate: editingBooking.bookingDate ?? '',
         preferredDay: editingBooking.preferredDay,
         preferredWindow: editingBooking.preferredWindow,
         serviceIds: editingBooking.serviceIds,
@@ -267,13 +283,14 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
       await updateAdminBookingStatus(booking.id, nextStatus);
       if (user) {
         try {
+          const scheduleLabel = formatBookingDate(booking.bookingDate, booking.preferredDay);
           await sendBookingMessage({
             booking,
             senderUid: user.uid,
             senderRole: 'admin',
             senderName: settings.businessName,
             messageType: 'status_update',
-            body: `Booking status updated to ${STATUS_LABELS[nextStatus]} (${booking.preferredDay} · ${booking.preferredWindow}).`,
+            body: `Booking status updated to ${STATUS_LABELS[nextStatus]} (${scheduleLabel} · ${booking.preferredWindow}).`,
           });
         } catch {
           // Non-blocking: booking status already updated
@@ -325,6 +342,7 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
       });
 
       try {
+        const scheduleLabel = formatBookingDate(booking.bookingDate, booking.preferredDay);
         await sendBookingMessage({
           booking,
           senderUid: auth.currentUser.uid,
@@ -333,7 +351,7 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
           messageType: 'confirmation_email',
           body: [
             `Confirmation email sent to ${response.to} (Ref: ${response.messageId}).`,
-            `Scheduled: ${booking.preferredDay} · ${booking.preferredWindow} at ${booking.address}.`,
+            `Scheduled: ${scheduleLabel} · ${booking.preferredWindow} at ${booking.address}.`,
             options.customNote.trim() ? `Mechanic note: ${options.customNote.trim()}` : '',
           ]
             .filter(Boolean)
@@ -390,13 +408,14 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
 
       if (user) {
         try {
+          const scheduleLabel = formatBookingDate(booking.bookingDate, booking.preferredDay);
           await sendBookingMessage({
             booking,
             senderUid: user.uid,
             senderRole: 'admin',
             senderName: settings.businessName,
             messageType: options.channel === 'manual' ? 'status_update' : 'confirmation_email',
-            body: `${channelLabel} for ${booking.preferredDay} (${booking.preferredWindow}).${
+            body: `${channelLabel} for ${scheduleLabel} (${booking.preferredWindow}).${
               options.customNote.trim() ? ` Note: ${options.customNote.trim()}` : ''
             }`,
           });
@@ -421,10 +440,50 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
     try {
       await deleteAdminBooking(bookingId);
       setConfirmDeleteBookingId(null);
+      setSelectedBookingIds((prev) => prev.filter((id) => id !== bookingId));
       if (editingBooking?.id === bookingId) setEditingBooking(null);
       showToast('Booking deleted.');
     } catch (err) {
       setDataError(err instanceof Error ? err.message : 'Failed to delete booking.');
+    }
+  };
+
+  const toggleBookingSelection = (bookingId: string) => {
+    setConfirmBulkDeleteBookings(false);
+    setSelectedBookingIds((prev) =>
+      prev.includes(bookingId) ? prev.filter((id) => id !== bookingId) : [...prev, bookingId],
+    );
+  };
+
+  const handleToggleSelectAllVisibleBookings = () => {
+    setConfirmBulkDeleteBookings(false);
+    const visibleIds = filteredBookings.map((b) => b.id);
+    const allSelected =
+      visibleIds.length > 0 && visibleIds.every((id) => selectedBookingIds.includes(id));
+    if (allSelected) {
+      setSelectedBookingIds((prev) => prev.filter((id) => !visibleIds.includes(id)));
+    } else {
+      setSelectedBookingIds((prev) => Array.from(new Set([...prev, ...visibleIds])));
+    }
+  };
+
+  const handleBulkDeleteBookings = async () => {
+    if (selectedBookingIds.length === 0) return;
+    setBulkDeletingBookings(true);
+    setDataError('');
+    try {
+      const count = selectedBookingIds.length;
+      await deleteAdminBookingsBulk(selectedBookingIds);
+      if (editingBooking && selectedBookingIds.includes(editingBooking.id)) {
+        setEditingBooking(null);
+      }
+      setSelectedBookingIds([]);
+      setConfirmBulkDeleteBookings(false);
+      showToast(`Deleted ${count} booking${count === 1 ? '' : 's'}.`);
+    } catch (err) {
+      setDataError(err instanceof Error ? err.message : 'Failed to delete selected bookings.');
+    } finally {
+      setBulkDeletingBookings(false);
     }
   };
 
@@ -474,12 +533,105 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
     }
   };
 
-  const handleDeleteCustomerProfile = async (profileId: string) => {
+  const handleDeleteCustomer = async (
+    cust: AggregatedCustomer,
+    mode: 'profile_only' | 'customer_and_bookings',
+  ) => {
+    setDeletingCustomerKey(cust.key);
+    setDataError('');
     try {
-      await deleteAdminCustomer(profileId);
-      showToast('Saved customer profile removed.');
+      if (cust.hasSavedProfile) {
+        await deleteAdminCustomer(cust.profileId);
+      }
+      let deletedBookingsCount = 0;
+      if (mode === 'customer_and_bookings') {
+        const matchingBookingIds = bookings
+          .filter((b) => b.contactEmail.trim().toLowerCase() === cust.key)
+          .map((b) => b.id);
+        if (matchingBookingIds.length > 0) {
+          await deleteAdminBookingsBulk(matchingBookingIds);
+          deletedBookingsCount = matchingBookingIds.length;
+        }
+      }
+      if (
+        editingCustomer &&
+        (editingCustomer.id === cust.profileId ||
+          editingCustomer.email.trim().toLowerCase() === cust.key)
+      ) {
+        setEditingCustomer(null);
+      }
+      setConfirmDeleteCustomerKey(null);
+      setSelectedCustomerKeys((prev) => prev.filter((key) => key !== cust.key));
+      if (mode === 'profile_only') {
+        showToast(`Removed saved CRM profile for ${cust.name}.`);
+      } else if (deletedBookingsCount > 0) {
+        showToast(
+          `Deleted ${cust.name} and ${deletedBookingsCount} associated booking${
+            deletedBookingsCount === 1 ? '' : 's'
+          }.`,
+        );
+      } else {
+        showToast(`Deleted customer ${cust.name}.`);
+      }
     } catch (err) {
-      setDataError(err instanceof Error ? err.message : 'Failed to remove customer profile.');
+      setDataError(err instanceof Error ? err.message : 'Failed to delete customer data.');
+    } finally {
+      setDeletingCustomerKey(null);
+    }
+  };
+
+  const toggleCustomerSelection = (customerKey: string) => {
+    setConfirmBulkDeleteCustomers(false);
+    setSelectedCustomerKeys((prev) =>
+      prev.includes(customerKey) ? prev.filter((k) => k !== customerKey) : [...prev, customerKey],
+    );
+  };
+
+  const handleToggleSelectAllVisibleCustomers = () => {
+    setConfirmBulkDeleteCustomers(false);
+    const visibleKeys = aggregatedCustomers.map((c) => c.key);
+    const allSelected =
+      visibleKeys.length > 0 && visibleKeys.every((key) => selectedCustomerKeys.includes(key));
+    if (allSelected) {
+      setSelectedCustomerKeys((prev) => prev.filter((key) => !visibleKeys.includes(key)));
+    } else {
+      setSelectedCustomerKeys((prev) => Array.from(new Set([...prev, ...visibleKeys])));
+    }
+  };
+
+  const handleBulkDeleteCustomers = async () => {
+    if (selectedCustomerKeys.length === 0) return;
+    setBulkDeletingCustomers(true);
+    setDataError('');
+    try {
+      const selectedSet = new Set(selectedCustomerKeys);
+      const targets = aggregatedCustomers.filter((c) => selectedSet.has(c.key));
+      const profileDeletes = targets
+        .filter((c) => c.hasSavedProfile)
+        .map((c) => deleteAdminCustomer(c.profileId));
+      await Promise.all(profileDeletes);
+
+      const bookingIdsToDelete = bookings
+        .filter((b) => selectedSet.has(b.contactEmail.trim().toLowerCase()))
+        .map((b) => b.id);
+      if (bookingIdsToDelete.length > 0) {
+        await deleteAdminBookingsBulk(bookingIdsToDelete);
+      }
+
+      setSelectedCustomerKeys([]);
+      setConfirmBulkDeleteCustomers(false);
+      setEditingCustomer(null);
+      showToast(
+        `Deleted ${targets.length} customer${targets.length === 1 ? '' : 's'}${
+          bookingIdsToDelete.length > 0
+            ? ` and ${bookingIdsToDelete.length} booking${bookingIdsToDelete.length === 1 ? '' : 's'}`
+            : ''
+        }.`,
+      );
+    } catch (err) {
+      setDataError(err instanceof Error ? err.message : 'Failed to delete selected customers.');
+    } finally {
+      setBulkDeletingCustomers(false);
     }
   };
 
@@ -640,8 +792,13 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
   }
 
   const openBookingsCount = bookings.filter(
-    (b) => b.status === 'new' || b.status === 'confirmed' || b.status === 'in_progress',
+    (b) =>
+      b.status === 'new' ||
+      b.status === 'confirmed' ||
+      b.status === 'in_progress' ||
+      b.status === 'ongoing',
   ).length;
+  const ongoingBookingsCount = bookings.filter((b) => b.status === 'ongoing').length;
 
   return (
     <section aria-labelledby="admin-console-heading" className="py-12 sm:py-16">
@@ -669,6 +826,7 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
               {(
                 [
                   { id: 'bookings', label: `Bookings (${bookings.length})` },
+                  { id: 'calendar', label: 'Calendar' },
                   { id: 'analytics', label: 'Analytics' },
                   { id: 'customers', label: `Customers (${aggregatedCustomers.length})` },
                   { id: 'site', label: 'Site Editor & Pricing' },
@@ -681,12 +839,13 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                   role="tab"
                   aria-selected={activeTab === tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`min-h-[38px] px-3.5 py-1.5 rounded-[10px] text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                  className={`min-h-[38px] px-3.5 py-1.5 rounded-[10px] text-xs font-semibold whitespace-nowrap shrink-0 inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
                     activeTab === tab.id
                       ? 'bg-[#F4F4F0] text-[#121214]'
                       : 'text-[#A1A1AA] hover:text-[#F4F4F0]'
                   }`}
                 >
+                  {tab.id === 'calendar' && <Calendar className="w-3.5 h-3.5" aria-hidden="true" />}
                   {tab.label}
                 </button>
               ))}
@@ -710,6 +869,11 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
             <div className="font-dot text-3xl font-extrabold tabular-nums mt-1">
               {openBookingsCount}
             </div>
+            {ongoingBookingsCount > 0 && (
+              <div className="font-mono text-[11px] text-[#B45309] mt-1">
+                {ongoingBookingsCount} ONGOING
+              </div>
+            )}
           </div>
           <div className="rounded-[18px] bg-[#131316] p-5 border border-white/10">
             <div className="font-mono text-[11px] text-[#A1A1AA]">TOTAL REQUESTS</div>
@@ -808,7 +972,7 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                   <div className="space-y-1">
                     <label htmlFor="edit-status" className="text-xs font-semibold">
                       Status
@@ -830,6 +994,27 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                         </option>
                       ))}
                     </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label htmlFor="edit-booking-date" className="text-xs font-semibold">
+                      Appointment Date
+                    </label>
+                    <input
+                      id="edit-booking-date"
+                      type="date"
+                      value={editingBooking.bookingDate ?? ''}
+                      onChange={(e) => {
+                        const nextDate = e.target.value;
+                        const derivedDay = nextDate ? getOperatingDayFromDateKey(nextDate) : null;
+                        setEditingBooking({
+                          ...editingBooking,
+                          bookingDate: nextDate || undefined,
+                          preferredDay: derivedDay ?? editingBooking.preferredDay,
+                        });
+                      }}
+                      className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm tabular-nums"
+                    />
                   </div>
 
                   <div className="space-y-1">
@@ -974,58 +1159,143 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
               </div>
             ) : (
               <div className="space-y-3">
+                {/* Bulk Selection Bar */}
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-[14px] bg-[#141418] border border-white/10 px-4 py-2.5">
+                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#D4D4D8] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={
+                        filteredBookings.length > 0 &&
+                        filteredBookings.every((b) => selectedBookingIds.includes(b.id))
+                      }
+                      onChange={handleToggleSelectAllVisibleBookings}
+                      className="w-4 h-4 accent-[#E8452C] cursor-pointer"
+                    />
+                    Select All Visible ({filteredBookings.length})
+                  </label>
+
+                  {selectedBookingIds.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-[11px] text-[#A1A1AA]">
+                        {selectedBookingIds.length} SELECTED
+                      </span>
+                      {confirmBulkDeleteBookings ? (
+                        <>
+                          <button
+                            type="button"
+                            disabled={bulkDeletingBookings}
+                            onClick={handleBulkDeleteBookings}
+                            className="min-h-[34px] px-3 py-1 rounded-[9px] bg-[#E8452C] hover:bg-[#D53A22] disabled:opacity-50 text-white text-xs font-semibold cursor-pointer"
+                          >
+                            {bulkDeletingBookings
+                              ? 'Deleting...'
+                              : `Confirm Delete (${selectedBookingIds.length})`}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmBulkDeleteBookings(false)}
+                            className="min-h-[34px] px-3 py-1 rounded-[9px] border border-white/15 text-xs text-[#A1A1AA] cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmBulkDeleteBookings(true)}
+                            className="min-h-[34px] px-3 py-1 rounded-[9px] bg-[#E8452C]/15 border border-[#E8452C]/40 text-[#FCA5A5] hover:bg-[#E8452C] hover:text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                            Delete Selected ({selectedBookingIds.length})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedBookingIds([])}
+                            className="min-h-[34px] px-2.5 py-1 rounded-[9px] border border-white/15 text-xs text-[#A1A1AA] cursor-pointer"
+                          >
+                            Clear
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {filteredBookings.map((b) => {
                   const isUpdatingThis = updatingStatusId === b.id;
                   const isConfirmOpen = confirmingBookingId === b.id;
                   const isMessagesOpen = messagingBookingId === b.id;
+                  const isSelected = selectedBookingIds.includes(b.id);
                   const sentLabel = formatConfirmationTimestamp(b.confirmationSentAt);
+                  const scheduleLabel = formatBookingDate(b.bookingDate, b.preferredDay);
                   return (
                     <div key={b.id} className="space-y-3">
-                      <article className="rounded-[18px] bg-[#131316] border border-white/10 p-5 flex flex-col xl:flex-row xl:items-center justify-between gap-5">
-                        <div className="space-y-2 min-w-0">
-                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs">
-                            <span className="text-[#F4F4F0] font-semibold">{b.referenceId}</span>
-                            <span
-                              className={`font-semibold ${
-                                b.status === 'confirmed'
-                                  ? 'text-emerald-400'
-                                  : b.status === 'completed'
-                                    ? 'text-[#A1A1AA]'
-                                    : b.status === 'cancelled'
-                                      ? 'text-[#71717A]'
-                                      : 'text-[#E8452C]'
-                              }`}
-                            >
-                              {STATUS_LABELS[b.status].toUpperCase()}
-                            </span>
-                            {sentLabel && (
-                              <span className="text-emerald-400">
-                                · CONFIRMATION SENT {sentLabel.toUpperCase()}
+                      <article
+                        className={`rounded-[18px] bg-[#131316] border p-5 flex flex-col xl:flex-row xl:items-center justify-between gap-5 transition-colors ${
+                          isSelected ? 'border-[#E8452C]/60' : 'border-white/10'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3.5 min-w-0">
+                          <input
+                            type="checkbox"
+                            aria-label={`Select booking ${b.referenceId}`}
+                            checked={isSelected}
+                            onChange={() => toggleBookingSelection(b.id)}
+                            className="w-4 h-4 mt-1 accent-[#E8452C] shrink-0 cursor-pointer"
+                          />
+                          <div className="space-y-2 min-w-0">
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs">
+                              <span className="text-[#F4F4F0] font-semibold">{b.referenceId}</span>
+                              <span
+                                className={`font-semibold ${
+                                  b.status === 'confirmed'
+                                    ? 'text-emerald-400'
+                                    : b.status === 'ongoing'
+                                      ? 'text-amber-400'
+                                      : b.status === 'in_progress'
+                                        ? 'text-[#60A5FA]'
+                                        : b.status === 'completed'
+                                          ? 'text-[#A1A1AA]'
+                                          : b.status === 'cancelled'
+                                            ? 'text-[#71717A]'
+                                            : 'text-[#E8452C]'
+                                }`}
+                              >
+                                {STATUS_LABELS[b.status].toUpperCase()}
                               </span>
-                            )}
-                            <span className="text-[#A1A1AA]">
-                              {b.preferredDay} · {b.preferredWindow}
-                            </span>
-                            <span className="text-[#F4F4F0] tabular-nums">
-                              {b.estimatedLaborLabel}
-                            </span>
-                          </div>
+                              {sentLabel && (
+                                <span className="text-emerald-400">
+                                  · CONFIRMATION SENT {sentLabel.toUpperCase()}
+                                </span>
+                              )}
+                              <span className="text-[#F4F4F0]">
+                                {scheduleLabel} · {b.preferredWindow}
+                              </span>
+                              {!b.bookingDate && (
+                                <span className="text-amber-300">· NO EXACT DATE</span>
+                              )}
+                              <span className="text-[#F4F4F0] tabular-nums">
+                                {b.estimatedLaborLabel}
+                              </span>
+                            </div>
 
-                          <div className="text-base font-semibold text-[#F4F4F0]">
-                            {b.riderName} · {b.scooterModel}
-                          </div>
+                            <div className="text-base font-semibold text-[#F4F4F0]">
+                              {b.riderName} · {b.scooterModel}
+                            </div>
 
-                          <div className="text-xs text-[#A1A1AA] space-y-0.5">
-                            <p>
-                              {b.contactPhone} · {b.contactEmail} · {b.address}
-                            </p>
-                            <p className="text-[#D4D4D8]">Services: {b.serviceTitles.join(', ')}</p>
+                            <div className="text-xs text-[#A1A1AA] space-y-0.5">
+                              <p>
+                                {b.contactPhone} · {b.contactEmail} · {b.address}
+                              </p>
+                              <p className="text-[#D4D4D8]">Services: {b.serviceTitles.join(', ')}</p>
                             {b.notes && <p className="text-[#A1A1AA]">Rider note: {b.notes}</p>}
                             {b.adminNotes && (
                               <p className="text-[#4A82E8] whitespace-pre-line">
                                 Mechanic note: {b.adminNotes}
                               </p>
                             )}
+                            </div>
                           </div>
                         </div>
 
@@ -1162,7 +1432,35 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
           </div>
         )}
 
-        {/* TAB 2: BOOKING & SERVICE ANALYTICS */}
+        {/* TAB 2: DISPATCH & REPAIR CALENDAR */}
+        {activeTab === 'calendar' && (
+          <AdminCalendarPanel
+            bookings={bookings}
+            updatingStatusId={updatingStatusId}
+            onQuickStatusChange={handleQuickStatusChange}
+            onEditBooking={(b) => {
+              setConfirmingBookingId(null);
+              setMessagingBookingId(null);
+              setEditingBooking(b);
+              setActiveTab('bookings');
+            }}
+            onOpenConfirm={(b) => {
+              setEditingBooking(null);
+              setMessagingBookingId(null);
+              setConfirmingBookingId(b.id);
+              setActiveTab('bookings');
+            }}
+            onOpenMessages={(b) => {
+              setEditingBooking(null);
+              setConfirmingBookingId(null);
+              setMessagingBookingId(b.id);
+              setActiveTab('bookings');
+            }}
+            onDeleteBooking={handleDeleteBooking}
+          />
+        )}
+
+        {/* TAB 3: BOOKING & SERVICE ANALYTICS */}
         {activeTab === 'analytics' && (
           <AdminAnalyticsPanel
             bookings={bookings}
@@ -1349,56 +1647,185 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                 bookings or can be added manually above.
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {aggregatedCustomers.map((cust) => (
-                  <article
-                    key={cust.key}
-                    className="rounded-[18px] bg-[#131316] border border-white/10 p-5 flex flex-col justify-between gap-4"
-                  >
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2 font-mono text-[11px] text-[#A1A1AA]">
-                        <span>
-                          {cust.bookingCount} BOOKING{cust.bookingCount === 1 ? '' : 'S'} · LAST{' '}
-                          {cust.lastBookingRef}
-                        </span>
-                        <span>{cust.hasSavedProfile ? 'SAVED CRM' : 'FROM BOOKING'}</span>
-                      </div>
-                      <h3 className="text-base font-semibold text-[#F4F4F0]">{cust.name}</h3>
-                      <p className="text-xs text-[#D4D4D8]">
-                        {cust.phone} · {cust.email}
-                      </p>
-                      <p className="text-xs text-[#A1A1AA]">
-                        Scooter: {cust.scooterModel || '—'}
-                        {cust.serialNumber ? ` · S/N ${cust.serialNumber}` : ''}
-                      </p>
-                      {cust.address && (
-                        <p className="text-xs text-[#A1A1AA]">Address: {cust.address}</p>
-                      )}
-                      {cust.mechanicNotes && (
-                        <p className="text-xs text-[#4A82E8]">Notes: {cust.mechanicNotes}</p>
-                      )}
-                    </div>
+              <div className="space-y-4">
+                {/* Bulk Selection Bar for Customers */}
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-[14px] bg-[#141418] border border-white/10 px-4 py-2.5">
+                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#D4D4D8] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={
+                        aggregatedCustomers.length > 0 &&
+                        aggregatedCustomers.every((c) => selectedCustomerKeys.includes(c.key))
+                      }
+                      onChange={handleToggleSelectAllVisibleCustomers}
+                      className="w-4 h-4 accent-[#E8452C] cursor-pointer"
+                    />
+                    Select All Visible ({aggregatedCustomers.length})
+                  </label>
 
-                    <div className="flex items-center justify-between gap-3 pt-3 border-t border-white/10">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenCustomerEditor(cust)}
-                        className="min-h-[38px] px-3.5 py-1.5 rounded-[10px] bg-[#F4F4F0] text-[#121214] text-xs font-semibold hover:bg-white cursor-pointer"
-                      >
-                        {cust.hasSavedProfile ? 'Edit Profile' : 'Save to CRM'}
-                      </button>
-                      {cust.hasSavedProfile && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteCustomerProfile(cust.profileId)}
-                          className="text-xs text-[#A1A1AA] hover:text-[#E8452C] cursor-pointer"
-                        >
-                          Remove CRM Note
-                        </button>
+                  {selectedCustomerKeys.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-[11px] text-[#A1A1AA]">
+                        {selectedCustomerKeys.length} SELECTED
+                      </span>
+                      {confirmBulkDeleteCustomers ? (
+                        <>
+                          <button
+                            type="button"
+                            disabled={bulkDeletingCustomers}
+                            onClick={handleBulkDeleteCustomers}
+                            className="min-h-[34px] px-3 py-1 rounded-[9px] bg-[#E8452C] hover:bg-[#D53A22] disabled:opacity-50 text-white text-xs font-semibold cursor-pointer"
+                          >
+                            {bulkDeletingCustomers
+                              ? 'Deleting...'
+                              : `Confirm Delete (${selectedCustomerKeys.length}) & Bookings`}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmBulkDeleteCustomers(false)}
+                            className="min-h-[34px] px-3 py-1 rounded-[9px] border border-white/15 text-xs text-[#A1A1AA] cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmBulkDeleteCustomers(true)}
+                            className="min-h-[34px] px-3 py-1 rounded-[9px] bg-[#E8452C]/15 border border-[#E8452C]/40 text-[#FCA5A5] hover:bg-[#E8452C] hover:text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                            Delete Selected ({selectedCustomerKeys.length})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCustomerKeys([])}
+                            className="min-h-[34px] px-2.5 py-1 rounded-[9px] border border-white/15 text-xs text-[#A1A1AA] cursor-pointer"
+                          >
+                            Clear
+                          </button>
+                        </>
                       )}
                     </div>
-                  </article>
-                ))}
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {aggregatedCustomers.map((cust) => {
+                    const isConfirmingDelete = confirmDeleteCustomerKey === cust.key;
+                    const isDeletingThis = deletingCustomerKey === cust.key;
+                    const isSelected = selectedCustomerKeys.includes(cust.key);
+                    return (
+                      <article
+                        key={cust.key}
+                        className={`rounded-[18px] bg-[#131316] border p-5 flex flex-col justify-between gap-4 transition-colors ${
+                          isSelected ? 'border-[#E8452C]/60' : 'border-white/10'
+                        }`}
+                      >
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between gap-2 font-mono text-[11px] text-[#A1A1AA]">
+                            <label className="inline-flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                aria-label={`Select customer ${cust.name}`}
+                                checked={isSelected}
+                                onChange={() => toggleCustomerSelection(cust.key)}
+                                className="w-4 h-4 accent-[#E8452C] cursor-pointer"
+                              />
+                              <span>
+                                {cust.bookingCount} BOOKING{cust.bookingCount === 1 ? '' : 'S'} · LAST{' '}
+                                {cust.lastBookingRef}
+                              </span>
+                            </label>
+                            <span>{cust.hasSavedProfile ? 'SAVED CRM' : 'FROM BOOKING'}</span>
+                          </div>
+                          <h3 className="text-base font-semibold text-[#F4F4F0]">{cust.name}</h3>
+                          <p className="text-xs text-[#D4D4D8]">
+                            {cust.phone} · {cust.email}
+                          </p>
+                          <p className="text-xs text-[#A1A1AA]">
+                            Scooter: {cust.scooterModel || '—'}
+                            {cust.serialNumber ? ` · S/N ${cust.serialNumber}` : ''}
+                          </p>
+                          {cust.address && (
+                            <p className="text-xs text-[#A1A1AA]">Address: {cust.address}</p>
+                          )}
+                          {cust.mechanicNotes && (
+                            <p className="text-xs text-[#4A82E8]">Notes: {cust.mechanicNotes}</p>
+                          )}
+                        </div>
+
+                        <div className="pt-3 border-t border-white/10 space-y-2.5">
+                          {isConfirmingDelete ? (
+                            <div className="rounded-[12px] bg-[#1A1416] border border-[#E8452C]/35 p-3 space-y-2.5">
+                              <p className="text-xs text-[#FCA5A5]">
+                                {cust.bookingCount > 0
+                                  ? `Delete ${cust.name}? Removing all ${cust.bookingCount} booking${
+                                      cust.bookingCount === 1 ? '' : 's'
+                                    } permanently removes them from this list.`
+                                  : `Permanently delete customer profile for ${cust.name}?`}
+                              </p>
+                              <div className="flex flex-wrap items-center gap-2">
+                                {cust.hasSavedProfile && cust.bookingCount > 0 && (
+                                  <button
+                                    type="button"
+                                    disabled={isDeletingThis}
+                                    onClick={() => handleDeleteCustomer(cust, 'profile_only')}
+                                    className="min-h-[34px] px-3 py-1 rounded-[9px] border border-white/20 text-xs font-semibold text-[#F4F4F0] hover:bg-white/10 disabled:opacity-50 cursor-pointer"
+                                  >
+                                    Delete CRM Profile Only
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  disabled={isDeletingThis}
+                                  onClick={() => handleDeleteCustomer(cust, 'customer_and_bookings')}
+                                  className="min-h-[34px] px-3 py-1 rounded-[9px] bg-[#E8452C] hover:bg-[#D53A22] disabled:opacity-50 text-white text-xs font-semibold cursor-pointer"
+                                >
+                                  {isDeletingThis
+                                    ? 'Deleting...'
+                                    : cust.bookingCount > 0
+                                      ? `Delete Customer & ${cust.bookingCount} Booking${
+                                          cust.bookingCount === 1 ? '' : 's'
+                                        }`
+                                      : 'Confirm Delete Customer'}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isDeletingThis}
+                                  onClick={() => setConfirmDeleteCustomerKey(null)}
+                                  className="min-h-[34px] px-2.5 py-1 rounded-[9px] border border-white/15 text-xs text-[#A1A1AA] cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-between gap-3">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenCustomerEditor(cust)}
+                                className="min-h-[38px] px-3.5 py-1.5 rounded-[10px] bg-[#F4F4F0] text-[#121214] text-xs font-semibold hover:bg-white cursor-pointer"
+                              >
+                                {cust.hasSavedProfile ? 'Edit Profile' : 'Save to CRM'}
+                              </button>
+                              <button
+                                type="button"
+                                aria-label={`Delete customer ${cust.name}`}
+                                onClick={() => setConfirmDeleteCustomerKey(cust.key)}
+                                className="min-h-[38px] px-3 py-1.5 rounded-[10px] border border-white/15 text-xs font-semibold text-[#A1A1AA] hover:text-[#E8452C] hover:border-[#E8452C] inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
@@ -1655,7 +2082,7 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                       <p className="text-xs text-[#A1A1AA] line-clamp-2">{svc.summary}</p>
                     </div>
 
-                    <div className="flex items-center justify-between gap-2 pt-3 border-t border-white/10">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-white/10">
                       <button
                         type="button"
                         onClick={() => openServiceEditor(svc)}
@@ -1663,17 +2090,43 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                       >
                         Edit Price / Details
                       </button>
-                      <button
-                        type="button"
-                        aria-label={`Delete ${svc.title}`}
-                        onClick={async () => {
-                          await deleteServiceItem(svc.id);
-                          showToast(`Removed ${svc.title}.`);
-                        }}
-                        className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center rounded-[10px] border border-white/15 text-[#A1A1AA] hover:text-[#E8452C] cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                      </button>
+                      {confirmDeleteServiceId === svc.id ? (
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await deleteServiceItem(svc.id);
+                                setConfirmDeleteServiceId(null);
+                                showToast(`Removed ${svc.title}.`);
+                              } catch (err) {
+                                setDataError(
+                                  err instanceof Error ? err.message : 'Failed to delete service.',
+                                );
+                              }
+                            }}
+                            className="min-h-[36px] px-2.5 py-1 rounded-[9px] bg-[#E8452C] text-white text-xs font-semibold cursor-pointer"
+                          >
+                            Confirm Delete
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteServiceId(null)}
+                            className="min-h-[36px] px-2.5 py-1 rounded-[9px] border border-white/15 text-xs text-[#A1A1AA] cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          aria-label={`Delete ${svc.title}`}
+                          onClick={() => setConfirmDeleteServiceId(svc.id)}
+                          className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center rounded-[10px] border border-white/15 text-[#A1A1AA] hover:text-[#E8452C] hover:border-[#E8452C] cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}

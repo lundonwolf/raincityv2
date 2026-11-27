@@ -121,6 +121,22 @@ describe('adminAnalytics', () => {
     assert.equal(statuses.find((s) => s.status === 'completed')?.count, 1);
     assert.equal(statuses.find((s) => s.status === 'cancelled')?.count, 1);
     assert.equal(statuses.find((s) => s.status === 'new')?.count, 0);
+    assert.equal(statuses.find((s) => s.status === 'ongoing')?.count, 0);
+
+    const withOngoing = [
+      ...SAMPLE_BOOKINGS,
+      makeBooking({
+        id: 'b-ongoing-1',
+        createdAtIso: '2026-11-25T18:00:00.000Z',
+        bookingDate: '2026-11-28',
+        preferredDay: 'Saturday',
+        status: 'ongoing',
+      }),
+    ];
+    const statusesWithOngoing = buildStatusBreakdown(withOngoing, 'all', FIXED_NOW);
+    assert.equal(statusesWithOngoing.find((s) => s.status === 'ongoing')?.count, 1);
+    const summaryWithOngoing = summarizeBookingAnalytics(withOngoing, SCOOTER_SERVICES, '7d', FIXED_NOW);
+    assert.equal(summaryWithOngoing.activeBookings, 3);
   });
 
   it('summarizes KPIs and handles empty bookings safely', () => {

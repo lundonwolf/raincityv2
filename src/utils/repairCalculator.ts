@@ -10,6 +10,7 @@ import {
   type ServiceCategory,
   type TimeWindow,
 } from '../data/scooterData';
+import { getOperatingDayFromDateKey, isValidDateKey } from './bookingDates';
 
 export interface RepairEstimate {
   selectedServices: ScooterService[];
@@ -31,6 +32,7 @@ export interface BookingFormInput {
   contactEmail: string;
   contactPhone: string;
   address: string;
+  bookingDate?: string;
   preferredDay: OperatingDay | '';
   preferredWindow: TimeWindow | '';
   notes: string;
@@ -191,6 +193,16 @@ export function validateBookingForm(input: BookingFormInput): BookingValidationR
 
   if (!input.address.trim() || input.address.trim().length < 5) {
     errors.address = 'Enter a street address or cross-streets for mobile service.';
+  }
+
+  if (typeof input.bookingDate === 'string') {
+    const trimmedDate = input.bookingDate.trim();
+    if (!trimmedDate || !isValidDateKey(trimmedDate)) {
+      errors.bookingDate = 'Choose a valid appointment date.';
+    } else if (!getOperatingDayFromDateKey(trimmedDate)) {
+      errors.bookingDate =
+        'We operate Mon, Fri, Sat, and Sun — please choose one of those dates.';
+    }
   }
 
   if (!input.preferredDay || !OPERATING_DAYS.includes(input.preferredDay)) {

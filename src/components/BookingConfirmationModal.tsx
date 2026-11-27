@@ -16,6 +16,7 @@ import {
   buildBookingConfirmationBundle,
   formatConfirmationTimestamp,
 } from '../utils/bookingConfirmation';
+import { formatBookingDate } from '../utils/bookingDates';
 
 interface BookingConfirmationModalProps {
   booking: BookingRecord;
@@ -109,7 +110,8 @@ export function BookingConfirmationModal({
             Confirm {booking.riderName} ({booking.scooterModel})
           </h2>
           <p className="text-xs text-[#52525B]">
-            {booking.preferredDay} · {booking.preferredWindow} · {booking.address}
+            {formatBookingDate(booking.bookingDate, booking.preferredDay)} ·{' '}
+            {booking.preferredWindow} · {booking.address}
             {sentDisplay ? ` · Last sent ${sentDisplay}` : ''}
           </p>
         </div>

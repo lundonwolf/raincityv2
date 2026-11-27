@@ -111,8 +111,29 @@ test('mapRowsToServices normalizes categories, pricing types, and active flags',
 
 test('normalizeBookingStatus and parsePostgresTimestamp clamp future dates safely', () => {
   assert.equal(normalizeBookingStatus('in-progress'), 'in_progress');
+  assert.equal(normalizeBookingStatus('ongoing'), 'ongoing');
+  assert.equal(normalizeBookingStatus('awaiting parts'), 'ongoing');
   assert.equal(normalizeBookingStatus('canceled'), 'cancelled');
   const now = new Date('2026-11-26T20:00:00Z');
   const futureClamped = parsePostgresTimestamp('2099-01-01T00:00:00Z', now);
   assert.ok(futureClamped.getTime() <= now.getTime());
+});
+
+test('mapRowsToBookings extracts YYYY-MM-DD bookingDate and preserves ongoing status', () => {
+  const csv = [
+    'id,customer_name,customer_email,customer_phone,scooter_model,service_address,appointment_date,booking_status',
+    '99,Morgan Hayes,morgan@example.com,206-555-2211,Apollo Phantom,"800 Mercer St, Seattle",2026-11-28,ongoing',
+  ].join('\n');
+  const parsed = parseReplitExportText(csv);
+  const mapping = autoDetectColumnMapping('bookings', parsed.headers);
+  const results = mapRowsToBookings(
+    parsed.rows,
+    mapping,
+    SCOOTER_SERVICES,
+    new Date('2026-11-26T20:00:00Z'),
+  );
+  assert.equal(results[0].valid, true);
+  assert.equal(results[0].data?.status, 'ongoing');
+  assert.equal(results[0].data?.bookingDate, '2026-11-28');
+  assert.equal(results[0].data?.preferredDay, 'Saturday');
 });

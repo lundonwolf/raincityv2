@@ -24,6 +24,7 @@ import {
 } from '../services/firestoreService';
 import type { AppRoute } from '../types/routes';
 import { formatConfirmationTimestamp } from '../utils/bookingConfirmation';
+import { formatBookingDate } from '../utils/bookingDates';
 import { BookingMessagesPanel } from './BookingMessagesPanel';
 
 interface CustomerAccountPortalProps {
@@ -35,6 +36,7 @@ const STATUS_STEPS: { id: BookingStatus; label: string }[] = [
   { id: 'new', label: 'Requested' },
   { id: 'confirmed', label: 'Confirmed' },
   { id: 'in_progress', label: 'In Progress' },
+  { id: 'ongoing', label: 'Ongoing' },
   { id: 'completed', label: 'Completed' },
 ];
 
@@ -42,6 +44,7 @@ const STATUS_LABELS: Record<BookingStatus, string> = {
   new: 'Requested',
   confirmed: 'Confirmed',
   in_progress: 'In Progress',
+  ongoing: 'Ongoing',
   completed: 'Completed',
   cancelled: 'Cancelled',
 };
@@ -379,9 +382,13 @@ export function CustomerAccountPortal({
                                 ? isSelected
                                   ? 'text-emerald-700'
                                   : 'text-emerald-400'
-                                : b.status === 'cancelled'
-                                  ? 'text-[#71717A]'
-                                  : 'text-[#E8452C]'
+                                : b.status === 'ongoing'
+                                  ? isSelected
+                                    ? 'text-amber-700'
+                                    : 'text-amber-400'
+                                  : b.status === 'cancelled'
+                                    ? 'text-[#71717A]'
+                                    : 'text-[#E8452C]'
                             }`}
                           >
                             {STATUS_LABELS[b.status].toUpperCase()}
@@ -394,7 +401,7 @@ export function CustomerAccountPortal({
                           }`}
                         >
                           <p>
-                            {b.preferredDay} · {b.preferredWindow}
+                            {formatBookingDate(b.bookingDate, b.preferredDay)} · {b.preferredWindow}
                           </p>
                           <p className="truncate">{b.serviceTitles.join(', ')}</p>
                           {sentLabel && (
@@ -421,8 +428,11 @@ export function CustomerAccountPortal({
                             {activeBooking.scooterModel}
                           </h2>
                           <p className="text-xs text-[#A1A1AA]">
-                            {activeBooking.preferredDay} · {activeBooking.preferredWindow} ·{' '}
-                            {activeBooking.address}
+                            {formatBookingDate(
+                              activeBooking.bookingDate,
+                              activeBooking.preferredDay,
+                            )}{' '}
+                            · {activeBooking.preferredWindow} · {activeBooking.address}
                           </p>
                         </div>
                         <div className="text-right">
@@ -440,7 +450,7 @@ export function CustomerAccountPortal({
                           Message us below if you would like to reschedule.
                         </div>
                       ) : (
-                        <div className="grid grid-cols-4 gap-2">
+                        <div className="grid grid-cols-5 gap-2">
                           {STATUS_STEPS.map((step, idx) => {
                             const currentIdx = STATUS_STEPS.findIndex(
                               (s) => s.id === activeBooking.status,
@@ -450,7 +460,11 @@ export function CustomerAccountPortal({
                               <div key={step.id} className="space-y-1.5">
                                 <div
                                   className={`h-1.5 rounded-full ${
-                                    isComplete ? 'bg-[#E8452C]' : 'bg-white/12'
+                                    isComplete
+                                      ? activeBooking.status === 'ongoing' && step.id === 'ongoing'
+                                        ? 'bg-amber-400'
+                                        : 'bg-[#E8452C]'
+                                      : 'bg-white/12'
                                   }`}
                                 />
                                 <div
@@ -460,7 +474,11 @@ export function CustomerAccountPortal({
                                 >
                                   {isComplete && (
                                     <CheckCircle2
-                                      className="w-3 h-3 text-[#E8452C] shrink-0"
+                                      className={`w-3 h-3 shrink-0 ${
+                                        activeBooking.status === 'ongoing' && step.id === 'ongoing'
+                                          ? 'text-amber-400'
+                                          : 'text-[#E8452C]'
+                                      }`}
                                       aria-hidden="true"
                                     />
                                   )}

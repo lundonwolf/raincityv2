@@ -2,7 +2,6 @@ import { useEffect, useState, type FormEvent, type MouseEvent } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { Check, CheckCircle2, Loader2, MessageSquare, RotateCcw, UserCircle2 } from 'lucide-react';
 import {
-  OPERATING_DAYS,
   TIME_WINDOWS,
   type OperatingDay,
   type ScooterService,
@@ -21,6 +20,12 @@ import {
   type BookingFormInput,
   type RepairEstimate,
 } from '../utils/repairCalculator';
+import {
+  formatBookingDate,
+  getOperatingDayFromDateKey,
+  getTodayPacificDateKey,
+  getUpcomingOperatingDates,
+} from '../utils/bookingDates';
 
 export interface ConfirmedBooking {
   referenceId: string;
@@ -30,6 +35,7 @@ export interface ConfirmedBooking {
   contactPhone: string;
   scooterModel: string;
   address: string;
+  bookingDate?: string;
   preferredDay: OperatingDay;
   preferredWindow: TimeWindow;
   serviceTitles: string[];
@@ -63,18 +69,41 @@ export function BookingConsole({
   onResetBooking,
   onNavigate,
 }: BookingConsoleProps) {
+  const upcomingDates = getUpcomingOperatingDates(6);
+  const todayDateKey = getTodayPacificDateKey();
+
   const [scooterModel, setScooterModel] = useState('');
   const [riderName, setRiderName] = useState('');
   const [contactEmail, setContactEmail] = useState('');
   const [contactPhone, setContactPhone] = useState('');
   const [address, setAddress] = useState('');
-  const [preferredDay, setPreferredDay] = useState<OperatingDay | ''>('Saturday');
+  const [bookingDate, setBookingDate] = useState<string>(upcomingDates[0]?.dateKey ?? '');
+  const [preferredDay, setPreferredDay] = useState<OperatingDay | ''>(
+    upcomingDates[0]?.dayName ?? 'Saturday',
+  );
   const [preferredWindow, setPreferredWindow] = useState<TimeWindow | ''>('10:00 AM – 12:00 PM');
   const [notes, setNotes] = useState('');
   const [signedInUser, setSignedInUser] = useState<User | null>(null);
   const [errors, setErrors] = useState<Partial<Record<keyof BookingFormInput, string>>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
+
+  const handleDateChange = (nextDateKey: string) => {
+    setBookingDate(nextDateKey);
+    const derivedDay = getOperatingDayFromDateKey(nextDateKey);
+    if (derivedDay) {
+      setPreferredDay(derivedDay);
+      setErrors((prev) => ({ ...prev, bookingDate: undefined, preferredDay: undefined }));
+    } else if (nextDateKey) {
+      setPreferredDay('');
+      setErrors((prev) => ({
+        ...prev,
+        bookingDate: 'We operate Mon, Fri, Sat, and Sun — please choose one of those dates.',
+      }));
+    } else {
+      setPreferredDay('');
+    }
+  };
 
   useEffect(() => {
     let unsubAccount: (() => void) | null = null;
@@ -125,6 +154,8 @@ export function BookingConsole({
     event.preventDefault();
     setSubmitError('');
 
+    const derivedDay = getOperatingDayFromDateKey(bookingDate) ?? preferredDay;
+
     const payload: BookingFormInput = {
       selectedServiceIds,
       scooterModel,
@@ -132,7 +163,8 @@ export function BookingConsole({
       contactEmail,
       contactPhone,
       address,
-      preferredDay,
+      bookingDate,
+      preferredDay: derivedDay,
       preferredWindow,
       notes,
     };
@@ -157,7 +189,8 @@ export function BookingConsole({
         contactPhone: contactPhone.trim(),
         scooterModel: scooterModel.trim(),
         address: address.trim(),
-        preferredDay: preferredDay as OperatingDay,
+        bookingDate: bookingDate.trim(),
+        preferredDay: derivedDay as OperatingDay,
         preferredWindow: preferredWindow as TimeWindow,
         serviceIds: estimate.selectedServices.map((s) => s.id),
         serviceTitles,
@@ -175,7 +208,8 @@ export function BookingConsole({
         contactPhone: contactPhone.trim(),
         scooterModel: scooterModel.trim(),
         address: address.trim(),
-        preferredDay: preferredDay as OperatingDay,
+        bookingDate: bookingDate.trim(),
+        preferredDay: derivedDay as OperatingDay,
         preferredWindow: preferredWindow as TimeWindow,
         serviceTitles,
         estimateLabel: estimate.estimatedLaborLabel,
@@ -262,9 +296,10 @@ export function BookingConsole({
                     <dd className="font-medium mt-0.5">{confirmedBooking.scooterModel}</dd>
                   </div>
                   <div>
-                    <dt className="font-mono text-[11px] text-[#A1A1AA]">REQUESTED WINDOW</dt>
+                    <dt className="font-mono text-[11px] text-[#A1A1AA]">REQUESTED DATE &amp; WINDOW</dt>
                     <dd className="font-medium mt-0.5">
-                      {confirmedBooking.preferredDay} · {confirmedBooking.preferredWindow}
+                      {formatBookingDate(confirmedBooking.bookingDate, confirmedBooking.preferredDay)}{' '}
+                      · {confirmedBooking.preferredWindow}
                     </dd>
                   </div>
                   <div>
@@ -418,58 +453,91 @@ export function BookingConsole({
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label htmlFor="preferred-day" className="block text-xs font-semibold text-[#27272A]">
-                    Preferred Operating Day
-                  </label>
-                  <select
-                    id="preferred-day"
-                    value={preferredDay}
-                    onChange={(e) => setPreferredDay(e.target.value as OperatingDay | '')}
-                    aria-invalid={Boolean(errors.preferredDay)}
-                    className="w-full min-h-[44px] px-3.5 rounded-[10px] bg-white border border-black/15 text-sm text-[#121214]"
-                  >
-                    <option value="">Select day</option>
-                    {OPERATING_DAYS.map((day) => (
-                      <option key={day} value={day}>
-                        {day}
-                      </option>
-                    ))}
-                  </select>
-                  {errors.preferredDay && (
-                    <p role="alert" className="text-xs font-medium text-[#C82A14]">
-                      {errors.preferredDay}
-                    </p>
-                  )}
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="block text-xs font-semibold text-[#27272A]">
+                    Appointment Date (Mon, Fri, Sat, or Sun)
+                  </span>
+                  <span className="font-mono text-[11px] text-[#52525B]">
+                    {bookingDate && getOperatingDayFromDateKey(bookingDate)
+                      ? formatBookingDate(bookingDate)
+                      : 'Choose an operating date'}
+                  </span>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="preferred-window"
-                    className="block text-xs font-semibold text-[#27272A]"
-                  >
-                    Arrival Window (10 AM – 5 PM)
-                  </label>
-                  <select
-                    id="preferred-window"
-                    value={preferredWindow}
-                    onChange={(e) => setPreferredWindow(e.target.value as TimeWindow | '')}
-                    aria-invalid={Boolean(errors.preferredWindow)}
-                    className="w-full min-h-[44px] px-3.5 rounded-[10px] bg-white border border-black/15 text-sm text-[#121214]"
-                  >
-                    <option value="">Select window</option>
-                    {TIME_WINDOWS.map((slot) => (
-                      <option key={slot} value={slot}>
-                        {slot}
-                      </option>
-                    ))}
-                  </select>
-                  {errors.preferredWindow && (
-                    <p role="alert" className="text-xs font-medium text-[#C82A14]">
-                      {errors.preferredWindow}
-                    </p>
-                  )}
+                {/* Quick-pick upcoming operating dates */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {upcomingDates.map((slot) => {
+                    const selected = bookingDate === slot.dateKey;
+                    return (
+                      <button
+                        key={slot.dateKey}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => handleDateChange(slot.dateKey)}
+                        className={`min-h-[40px] px-3 py-2 rounded-[10px] border text-xs font-semibold text-left transition-colors cursor-pointer ${
+                          selected
+                            ? 'bg-[#121214] text-[#F4F4F0] border-[#121214]'
+                            : 'bg-white text-[#121214] border-black/12 hover:border-black/30'
+                        }`}
+                      >
+                        {slot.shortLabel}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="booking-date"
+                      className="block text-xs font-semibold text-[#27272A]"
+                    >
+                      Or Pick Any Calendar Date
+                    </label>
+                    <input
+                      id="booking-date"
+                      type="date"
+                      min={todayDateKey}
+                      value={bookingDate}
+                      onChange={(e) => handleDateChange(e.target.value)}
+                      aria-invalid={Boolean(errors.bookingDate || errors.preferredDay)}
+                      className="w-full min-h-[44px] px-3.5 rounded-[10px] bg-white border border-black/15 text-sm text-[#121214]"
+                    />
+                    {(errors.bookingDate || errors.preferredDay) && (
+                      <p role="alert" className="text-xs font-medium text-[#C82A14]">
+                        {errors.bookingDate || errors.preferredDay}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="preferred-window"
+                      className="block text-xs font-semibold text-[#27272A]"
+                    >
+                      Arrival Window (10 AM – 5 PM)
+                    </label>
+                    <select
+                      id="preferred-window"
+                      value={preferredWindow}
+                      onChange={(e) => setPreferredWindow(e.target.value as TimeWindow | '')}
+                      aria-invalid={Boolean(errors.preferredWindow)}
+                      className="w-full min-h-[44px] px-3.5 rounded-[10px] bg-white border border-black/15 text-sm text-[#121214]"
+                    >
+                      <option value="">Select window</option>
+                      {TIME_WINDOWS.map((slot) => (
+                        <option key={slot} value={slot}>
+                          {slot}
+                        </option>
+                      ))}
+                    </select>
+                    {errors.preferredWindow && (
+                      <p role="alert" className="text-xs font-medium text-[#C82A14]">
+                        {errors.preferredWindow}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
 

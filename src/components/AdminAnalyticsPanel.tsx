@@ -31,6 +31,7 @@ const STATUS_SWATCH_CLASS: Record<BookingStatus, string> = {
   new: 'bg-[#E8452C]',
   confirmed: 'bg-[#4A82E8]',
   in_progress: 'bg-[#D9A441]',
+  ongoing: 'bg-[#A855F7]',
   completed: 'bg-[#22C55E]',
   cancelled: 'bg-[#71717A]',
 };

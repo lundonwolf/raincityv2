@@ -1,6 +1,7 @@
 import {
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   onSnapshot,
@@ -29,6 +30,7 @@ import {
   type UserAccountRecord,
 } from '../data/scooterData';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { isValidDateKey } from '../utils/bookingDates';
 
 function trimStr(value: string, maxLen: number): string {
   return value.trim().slice(0, maxLen);
@@ -322,6 +324,7 @@ export interface CreateBookingPayload {
   scooterModel: string;
   address: string;
   preferredDay: OperatingDay;
+  bookingDate?: string;
   preferredWindow: TimeWindow;
   serviceIds: string[];
   serviceTitles: string[];
@@ -350,26 +353,32 @@ export async function importAdminBooking(payload: AdminImportBookingPayload): Pr
       ? payload.createdAtDate.getTime()
       : nowMs - 1000;
 
+  const docBody: Record<string, unknown> = {
+    referenceId: safeRef,
+    riderName: trimStr(payload.riderName, 100),
+    contactEmail: trimStr(payload.contactEmail, 120),
+    contactPhone: trimStr(payload.contactPhone, 32),
+    scooterModel: trimStr(payload.scooterModel, 120),
+    address: trimStr(payload.address, 200),
+    preferredDay: payload.preferredDay,
+    preferredWindow: trimStr(payload.preferredWindow, 40),
+    serviceIds: payload.serviceIds.slice(0, 12).map((s) => s.slice(0, 64)),
+    serviceTitles: payload.serviceTitles.slice(0, 12).map((s) => trimStr(s, 120)),
+    estimatedLaborLabel: trimStr(payload.estimatedLaborLabel, 64),
+    estimatedMinutes: Math.max(0, Math.min(600, Math.round(payload.estimatedMinutes))),
+    notes: trimStr(payload.notes || '', 1000),
+    adminNotes: trimStr(payload.adminNotes || '', 1000),
+    status: payload.status,
+    createdAt: Timestamp.fromMillis(safeCreatedMs),
+    updatedAt: serverTimestamp(),
+  };
+
+  if (isValidDateKey(payload.bookingDate)) {
+    docBody.bookingDate = payload.bookingDate;
+  }
+
   try {
-    await setDoc(doc(db, 'bookings', bookingId), {
-      referenceId: safeRef,
-      riderName: trimStr(payload.riderName, 100),
-      contactEmail: trimStr(payload.contactEmail, 120),
-      contactPhone: trimStr(payload.contactPhone, 32),
-      scooterModel: trimStr(payload.scooterModel, 120),
-      address: trimStr(payload.address, 200),
-      preferredDay: payload.preferredDay,
-      preferredWindow: trimStr(payload.preferredWindow, 40),
-      serviceIds: payload.serviceIds.slice(0, 12).map((s) => s.slice(0, 64)),
-      serviceTitles: payload.serviceTitles.slice(0, 12).map((s) => trimStr(s, 120)),
-      estimatedLaborLabel: trimStr(payload.estimatedLaborLabel, 64),
-      estimatedMinutes: Math.max(0, Math.min(600, Math.round(payload.estimatedMinutes))),
-      notes: trimStr(payload.notes || '', 1000),
-      adminNotes: trimStr(payload.adminNotes || '', 1000),
-      status: payload.status,
-      createdAt: Timestamp.fromMillis(safeCreatedMs),
-      updatedAt: serverTimestamp(),
-    });
+    await setDoc(doc(db, 'bookings', bookingId), docBody);
     return bookingId;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
@@ -387,6 +396,10 @@ function mapBookingDoc(docSnap: QueryDocumentSnapshot): BookingRecord {
     scooterModel: String(d.scooterModel ?? ''),
     address: String(d.address ?? ''),
     preferredDay: (d.preferredDay ?? 'Saturday') as OperatingDay,
+    bookingDate:
+      typeof d.bookingDate === 'string' && isValidDateKey(d.bookingDate)
+        ? d.bookingDate
+        : undefined,
     preferredWindow: (d.preferredWindow ?? '10:00 AM – 12:00 PM') as TimeWindow,
     serviceIds: Array.isArray(d.serviceIds) ? d.serviceIds.map(String) : [],
     serviceTitles: Array.isArray(d.serviceTitles) ? d.serviceTitles.map(String) : [],
@@ -434,6 +447,9 @@ export async function createPublicBooking(payload: CreateBookingPayload): Promis
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
+  if (isValidDateKey(payload.bookingDate)) {
+    docBody.bookingDate = payload.bookingDate;
+  }
   if (payload.customerUid && /^[a-zA-Z0-9_-]{1,128}$/.test(payload.customerUid)) {
     docBody.customerUid = payload.customerUid;
   }
@@ -537,6 +553,7 @@ export async function updateAdminBooking(
     scooterModel: string;
     address: string;
     preferredDay: OperatingDay;
+    bookingDate?: string;
     preferredWindow: TimeWindow;
     serviceIds: string[];
     serviceTitles: string[];
@@ -548,24 +565,32 @@ export async function updateAdminBooking(
   },
 ): Promise<void> {
   const path = `bookings/${bookingId}`;
+  const payload: Record<string, unknown> = {
+    riderName: trimStr(updates.riderName, 100),
+    contactEmail: trimStr(updates.contactEmail, 120),
+    contactPhone: trimStr(updates.contactPhone, 32),
+    scooterModel: trimStr(updates.scooterModel, 120),
+    address: trimStr(updates.address, 200),
+    preferredDay: updates.preferredDay,
+    preferredWindow: trimStr(updates.preferredWindow, 40),
+    serviceIds: updates.serviceIds.slice(0, 12),
+    serviceTitles: updates.serviceTitles.slice(0, 12).map((t) => trimStr(t, 120)),
+    estimatedLaborLabel: trimStr(updates.estimatedLaborLabel, 64),
+    estimatedMinutes: Math.max(0, Math.min(600, Math.round(updates.estimatedMinutes))),
+    notes: trimStr(updates.notes, 1000),
+    adminNotes: trimStr(updates.adminNotes, 1000),
+    status: updates.status,
+    updatedAt: serverTimestamp(),
+  };
+
+  if (isValidDateKey(updates.bookingDate)) {
+    payload.bookingDate = updates.bookingDate;
+  } else if (updates.bookingDate === '') {
+    payload.bookingDate = deleteField();
+  }
+
   try {
-    await updateDoc(doc(db, 'bookings', bookingId), {
-      riderName: trimStr(updates.riderName, 100),
-      contactEmail: trimStr(updates.contactEmail, 120),
-      contactPhone: trimStr(updates.contactPhone, 32),
-      scooterModel: trimStr(updates.scooterModel, 120),
-      address: trimStr(updates.address, 200),
-      preferredDay: updates.preferredDay,
-      preferredWindow: trimStr(updates.preferredWindow, 40),
-      serviceIds: updates.serviceIds.slice(0, 12),
-      serviceTitles: updates.serviceTitles.slice(0, 12).map((t) => trimStr(t, 120)),
-      estimatedLaborLabel: trimStr(updates.estimatedLaborLabel, 64),
-      estimatedMinutes: Math.max(0, Math.min(600, Math.round(updates.estimatedMinutes))),
-      notes: trimStr(updates.notes, 1000),
-      adminNotes: trimStr(updates.adminNotes, 1000),
-      status: updates.status,
-      updatedAt: serverTimestamp(),
-    });
+    await updateDoc(doc(db, 'bookings', bookingId), payload);
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
@@ -753,6 +778,15 @@ export async function deleteAdminBooking(bookingId: string): Promise<void> {
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
+}
+
+export async function deleteAdminBookingsBulk(bookingIds: string[]): Promise<number> {
+  let deleted = 0;
+  for (const id of bookingIds) {
+    await deleteAdminBooking(id);
+    deleted += 1;
+  }
+  return deleted;
 }
 
 export function subscribeAdminCustomers(

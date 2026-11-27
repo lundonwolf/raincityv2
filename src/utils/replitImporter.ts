@@ -10,6 +10,7 @@ import {
   type ServiceCategory,
   type TimeWindow,
 } from '../data/scooterData';
+import { extractDateKeyFromRaw } from './bookingDates';
 
 export type ImportEntityType = 'bookings' | 'customers' | 'services';
 
@@ -27,6 +28,7 @@ export interface MappedBookingImport {
   scooterModel: string;
   address: string;
   preferredDay: OperatingDay;
+  bookingDate?: string;
   preferredWindow: TimeWindow;
   serviceIds: string[];
   serviceTitles: string[];
@@ -441,6 +443,19 @@ export function normalizeBookingStatus(raw: string): BookingStatus {
   if (['confirmed', 'scheduled', 'booked', 'approved', 'accepted'].includes(norm)) {
     return 'confirmed';
   }
+  if (
+    [
+      'ongoing',
+      'on_going',
+      'awaiting_parts',
+      'waiting_parts',
+      'parts_ordered',
+      'multi_day',
+      'follow_up',
+    ].includes(norm)
+  ) {
+    return 'ongoing';
+  }
   if (['in_progress', 'inprogress', 'working', 'active', 'started', 'repairing'].includes(norm)) {
     return 'in_progress';
   }
@@ -575,11 +590,13 @@ export function mapRowsToBookings(
     }
     usedRefs.add(referenceId);
 
+    const rawDayOrDate = get('preferredDay');
+    const bookingDate = extractDateKeyFromRaw(rawDayOrDate);
     const { day: preferredDay, defaulted: dayDefaulted } = normalizeOperatingDay(
-      get('preferredDay') || get('createdAt'),
+      rawDayOrDate || get('createdAt'),
     );
-    if (dayDefaulted && get('preferredDay')) {
-      warnings.push(`Mapped day "${get('preferredDay')}" to ${preferredDay}.`);
+    if (dayDefaulted && rawDayOrDate) {
+      warnings.push(`Mapped day "${rawDayOrDate}" to ${preferredDay}.`);
     }
 
     const preferredWindow = normalizeTimeWindow(get('preferredWindow'));
@@ -638,6 +655,7 @@ export function mapRowsToBookings(
         scooterModel,
         address,
         preferredDay,
+        bookingDate,
         preferredWindow,
         serviceIds,
         serviceTitles,

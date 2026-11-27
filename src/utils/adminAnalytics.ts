@@ -69,6 +69,7 @@ const STATUS_META: Record<BookingStatus, { label: string; color: string }> = {
   new: { label: 'New', color: '#E8452C' },
   confirmed: { label: 'Confirmed', color: '#4A82E8' },
   in_progress: { label: 'In Progress', color: '#D9A441' },
+  ongoing: { label: 'Ongoing', color: '#A855F7' },
   completed: { label: 'Completed', color: '#22C55E' },
   cancelled: { label: 'Cancelled', color: '#71717A' },
 };
@@ -355,6 +356,7 @@ export function buildStatusBreakdown(
     new: 0,
     confirmed: 0,
     in_progress: 0,
+    ongoing: 0,
     completed: 0,
     cancelled: 0,
   };
@@ -398,7 +400,8 @@ export function summarizeBookingAnalytics(
     if (
       booking.status === 'new' ||
       booking.status === 'confirmed' ||
-      booking.status === 'in_progress'
+      booking.status === 'in_progress' ||
+      booking.status === 'ongoing'
     ) {
       activeBookings += 1;
     } else if (booking.status === 'completed') {

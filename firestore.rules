@@ -54,6 +54,10 @@ service cloud.firestore {
         && (val.size() == 0 || (val[0] is string && val[0].size() <= maxItemLen));
     }
 
+    function isValidDateKey(val) {
+      return val is string && val.size() == 10 && val.matches('^\\d{4}-\\d{2}-\\d{2}$');
+    }
+
     function isBookingOwner(data) {
       return isVerifiedUser() && (
         ('customerUid' in data && data.customerUid == request.auth.uid)
@@ -165,7 +169,7 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'referenceId', 'riderName', 'contactEmail', 'contactPhone',
-          'scooterModel', 'address', 'zoneId', 'zoneName', 'preferredDay',
+          'scooterModel', 'address', 'zoneId', 'zoneName', 'preferredDay', 'bookingDate',
           'preferredWindow', 'serviceIds', 'serviceTitles',
           'estimatedLaborLabel', 'estimatedMinutes', 'notes', 'adminNotes',
           'status', 'customerUid', 'confirmationSentAt', 'confirmationMessageId',
@@ -181,6 +185,7 @@ service cloud.firestore {
         && (!('zoneId' in data) || isValidId(data.zoneId))
         && (!('zoneName' in data) || isNonEmptyString(data.zoneName, 2, 80))
         && data.preferredDay in ['Monday', 'Friday', 'Saturday', 'Sunday']
+        && (!('bookingDate' in data) || isValidDateKey(data.bookingDate))
         && isNonEmptyString(data.preferredWindow, 4, 40)
         && data.serviceIds is list && data.serviceIds.size() >= 1 && data.serviceIds.size() <= 12
         && data.serviceIds[0] is string && data.serviceIds[0].size() <= 64
@@ -190,7 +195,7 @@ service cloud.firestore {
         && data.estimatedMinutes is number && data.estimatedMinutes >= 0 && data.estimatedMinutes <= 600
         && isOptionalString(data.notes, 1000)
         && isOptionalString(data.adminNotes, 1000)
-        && data.status in ['new', 'confirmed', 'in_progress', 'completed', 'cancelled']
+        && data.status in ['new', 'confirmed', 'in_progress', 'ongoing', 'completed', 'cancelled']
         && (!('customerUid' in data) || isValidId(data.customerUid))
         && (!('confirmationSentAt' in data) || isOptionalString(data.confirmationSentAt, 40))
         && (!('confirmationMessageId' in data) || isOptionalString(data.confirmationMessageId, 120))
@@ -355,7 +360,7 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'riderName', 'contactEmail', 'contactPhone', 'scooterModel', 'address',
-          'preferredDay', 'preferredWindow',
+          'preferredDay', 'bookingDate', 'preferredWindow',
           'serviceIds', 'serviceTitles', 'estimatedLaborLabel', 'estimatedMinutes',
           'notes', 'adminNotes', 'status', 'customerUid',
           'confirmationSentAt', 'confirmationMessageId', 'updatedAt'
