@@ -414,7 +414,7 @@ export function AdminCalendarPanel({
                         className="min-h-[34px] px-2.5 py-1 rounded-[8px] border border-black/15 hover:bg-black/5 text-xs font-semibold text-[#121214] inline-flex items-center gap-1 cursor-pointer"
                       >
                         <MessageSquare className="w-3 h-3" aria-hidden="true" />
-                        Chat
+                        Updates
                       </button>
 
                       <button

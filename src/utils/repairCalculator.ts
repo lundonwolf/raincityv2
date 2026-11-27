@@ -44,6 +44,9 @@ export interface BookingValidationResult {
 }
 
 export interface SeattleScheduleStatus {
+  hours: string;
+  minutes: string;
+  period: 'AM' | 'PM';
   timeString: string;
   dayLabel: string;
   isOpenNow: boolean;
@@ -322,17 +325,23 @@ export function getSeattleScheduleStatus(now: Date = new Date()): SeattleSchedul
   const hourStr = parts.find((p) => p.type === 'hour')?.value ?? '10';
   const minuteStr = parts.find((p) => p.type === 'minute')?.value ?? '00';
   const hourNum = Number(hourStr) % 24;
+  const period: 'AM' | 'PM' = hourNum >= 12 ? 'PM' : 'AM';
+  const hour12 = hourNum % 12 === 0 ? 12 : hourNum % 12;
+  const hour12Str = String(hour12);
 
   const weekdayLong = weekdayLongFormatter.format(now);
   const isOperatingDay = (OPERATING_DAYS as readonly string[]).includes(weekdayLong);
   const isOpenNow = isOperatingDay && hourNum >= 10 && hourNum < 17;
 
   return {
-    timeString: `${String(hourNum).padStart(2, '0')}:${minuteStr}`,
+    hours: hour12Str,
+    minutes: minuteStr,
+    period,
+    timeString: `${hour12Str}:${minuteStr} ${period}`,
     dayLabel: dayFormatter.format(now).toUpperCase(),
     isOpenNow,
     statusLabel: isOpenNow
-      ? 'Dispatch Open · 10:00–17:00 PT'
-      : 'Next Dispatch · Mon, Fri–Sun 10:00–17:00',
+      ? 'Dispatch Open · 10:00 AM–5:00 PM PT'
+      : 'Next Dispatch · Mon, Fri–Sun 10:00 AM–5:00 PM',
   };
 }

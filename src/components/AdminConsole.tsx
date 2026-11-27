@@ -109,6 +109,7 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
   const [statusFilter, setStatusFilter] = useState<BookingStatus | 'all'>('all');
   const [bookingSearch, setBookingSearch] = useState('');
   const [editingBooking, setEditingBooking] = useState<BookingRecord | null>(null);
+  const [editCustomerUpdate, setEditCustomerUpdate] = useState('');
   const [confirmingBookingId, setConfirmingBookingId] = useState<string | null>(null);
   const [messagingBookingId, setMessagingBookingId] = useState<string | null>(null);
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
@@ -124,6 +125,7 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
   const [editingCustomer, setEditingCustomer] = useState<
     Omit<CustomerProfileRecord, 'updatedAtIso'> | null
   >(null);
+  const [editingCustomerKey, setEditingCustomerKey] = useState<string | null>(null);
   const [savingCustomer, setSavingCustomer] = useState(false);
   const [confirmDeleteCustomerKey, setConfirmDeleteCustomerKey] = useState<string | null>(null);
   const [deletingCustomerKey, setDeletingCustomerKey] = useState<string | null>(null);
@@ -134,6 +136,7 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
   // Site settings & service pricing editor state
   const [savingSettings, setSavingSettings] = useState(false);
   const [editingService, setEditingService] = useState<ScooterService | null>(null);
+  const [editingServiceIsNew, setEditingServiceIsNew] = useState(false);
   const [includesDraftText, setIncludesDraftText] = useState('');
   const [savingService, setSavingService] = useState(false);
   const [confirmDeleteServiceId, setConfirmDeleteServiceId] = useState<string | null>(null);
@@ -266,8 +269,30 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
         adminNotes: editingBooking.adminNotes,
         status: editingBooking.status,
       });
+
+      const postedUpdateText = editCustomerUpdate.trim();
+      if (postedUpdateText && user) {
+        try {
+          await sendBookingMessage({
+            booking: editingBooking,
+            senderUid: user.uid,
+            senderRole: 'admin',
+            senderName: settings.businessName,
+            messageType: 'status_update',
+            body: postedUpdateText,
+          });
+        } catch {
+          // Non-blocking: booking edits already saved
+        }
+      }
+
       setEditingBooking(null);
-      showToast(`Saved booking ${editingBooking.referenceId}.`);
+      setEditCustomerUpdate('');
+      showToast(
+        postedUpdateText
+          ? `Saved booking ${editingBooking.referenceId} & posted repair update to customer.`
+          : `Saved booking ${editingBooking.referenceId}.`,
+      );
     } catch (err) {
       setDataError(err instanceof Error ? err.message : 'Failed to update booking.');
     } finally {
@@ -488,6 +513,13 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
   };
 
   const handleOpenCustomerEditor = (cust: AggregatedCustomer) => {
+    if (editingCustomerKey === cust.key && editingCustomer) {
+      setEditingCustomer(null);
+      setEditingCustomerKey(null);
+      return;
+    }
+    setConfirmDeleteCustomerKey(null);
+    setEditingCustomerKey(cust.key);
     setEditingCustomer({
       id: cust.profileId,
       name: cust.name,
@@ -501,6 +533,12 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
   };
 
   const handleCreateNewCustomer = () => {
+    if (editingCustomerKey === '__new__' && editingCustomer) {
+      setEditingCustomer(null);
+      setEditingCustomerKey(null);
+      return;
+    }
+    setEditingCustomerKey('__new__');
     setEditingCustomer({
       id: `cust-${Date.now()}`,
       name: '',
@@ -525,6 +563,7 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
     try {
       await saveAdminCustomer(editingCustomer);
       setEditingCustomer(null);
+      setEditingCustomerKey(null);
       showToast(`Saved customer profile for ${editingCustomer.name}.`);
     } catch (err) {
       setDataError(err instanceof Error ? err.message : 'Failed to save customer profile.');
@@ -556,9 +595,11 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
       if (
         editingCustomer &&
         (editingCustomer.id === cust.profileId ||
-          editingCustomer.email.trim().toLowerCase() === cust.key)
+          editingCustomer.email.trim().toLowerCase() === cust.key ||
+          editingCustomerKey === cust.key)
       ) {
         setEditingCustomer(null);
+        setEditingCustomerKey(null);
       }
       setConfirmDeleteCustomerKey(null);
       setSelectedCustomerKeys((prev) => prev.filter((key) => key !== cust.key));
@@ -621,6 +662,7 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
       setSelectedCustomerKeys([]);
       setConfirmBulkDeleteCustomers(false);
       setEditingCustomer(null);
+      setEditingCustomerKey(null);
       showToast(
         `Deleted ${targets.length} customer${targets.length === 1 ? '' : 's'}${
           bookingIdsToDelete.length > 0
@@ -649,12 +691,24 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
   };
 
   const openServiceEditor = (svc: ScooterService) => {
+    if (editingService && !editingServiceIsNew && editingService.id === svc.id) {
+      setEditingService(null);
+      return;
+    }
+    setConfirmDeleteServiceId(null);
+    setEditingServiceIsNew(false);
     setEditingService({ ...svc });
     setIncludesDraftText(svc.includes.join('\n'));
   };
 
   const openNewServiceEditor = () => {
+    if (editingService && editingServiceIsNew) {
+      setEditingService(null);
+      setEditingServiceIsNew(false);
+      return;
+    }
     const nextNum = String(services.length + 1).padStart(2, '0');
+    setEditingServiceIsNew(true);
     setEditingService({
       id: `custom-service-${Date.now()}`,
       index: nextNum,
@@ -673,6 +727,13 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
       sortOrder: services.length + 1,
     });
     setIncludesDraftText('Scope confirmed before work');
+  };
+
+  const scrollToBookingCard = (bookingId: string) => {
+    window.setTimeout(() => {
+      const el = document.getElementById(`booking-card-${bookingId}`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
   };
 
   const handleSaveService = async (e: FormEvent) => {
@@ -951,7 +1012,7 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
               </div>
             </div>
 
-            {editingBooking && (
+            {editingBooking && !filteredBookings.some((b) => b.id === editingBooking.id) && (
               <form
                 onSubmit={handleSaveBookingEdit}
                 className="rounded-[22px] bg-[#F4F4F0] text-[#121214] p-6 border border-black/15 space-y-5"
@@ -971,180 +1032,27 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                     Cancel
                   </button>
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-                  <div className="space-y-1">
-                    <label htmlFor="edit-status" className="text-xs font-semibold">
-                      Status
-                    </label>
-                    <select
-                      id="edit-status"
-                      value={editingBooking.status}
-                      onChange={(e) =>
-                        setEditingBooking({
-                          ...editingBooking,
-                          status: e.target.value as BookingStatus,
-                        })
-                      }
-                      className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
-                    >
-                      {BOOKING_STATUSES.map((st) => (
-                        <option key={st} value={st}>
-                          {STATUS_LABELS[st]}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label htmlFor="edit-booking-date" className="text-xs font-semibold">
-                      Appointment Date
-                    </label>
-                    <input
-                      id="edit-booking-date"
-                      type="date"
-                      value={editingBooking.bookingDate ?? ''}
-                      onChange={(e) => {
-                        const nextDate = e.target.value;
-                        const derivedDay = nextDate ? getOperatingDayFromDateKey(nextDate) : null;
-                        setEditingBooking({
-                          ...editingBooking,
-                          bookingDate: nextDate || undefined,
-                          preferredDay: derivedDay ?? editingBooking.preferredDay,
-                        });
-                      }}
-                      className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm tabular-nums"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label htmlFor="edit-day" className="text-xs font-semibold">
-                      Scheduled Day
-                    </label>
-                    <select
-                      id="edit-day"
-                      value={editingBooking.preferredDay}
-                      onChange={(e) =>
-                        setEditingBooking({
-                          ...editingBooking,
-                          preferredDay: e.target.value as OperatingDay,
-                        })
-                      }
-                      className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
-                    >
-                      {OPERATING_DAYS.map((day) => (
-                        <option key={day} value={day}>
-                          {day}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label htmlFor="edit-window" className="text-xs font-semibold">
-                      Time Window
-                    </label>
-                    <select
-                      id="edit-window"
-                      value={editingBooking.preferredWindow}
-                      onChange={(e) =>
-                        setEditingBooking({
-                          ...editingBooking,
-                          preferredWindow: e.target.value as TimeWindow,
-                        })
-                      }
-                      className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
-                    >
-                      {TIME_WINDOWS.map((slot) => (
-                        <option key={slot} value={slot}>
-                          {slot}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label htmlFor="edit-estimate" className="text-xs font-semibold">
-                      Quoted Labor Label
-                    </label>
-                    <input
-                      id="edit-estimate"
-                      type="text"
-                      value={editingBooking.estimatedLaborLabel}
-                      onChange={(e) =>
-                        setEditingBooking({
-                          ...editingBooking,
-                          estimatedLaborLabel: e.target.value,
-                        })
-                      }
-                      className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label htmlFor="edit-address" className="text-xs font-semibold">
-                      Service Address
-                    </label>
-                    <input
-                      id="edit-address"
-                      type="text"
-                      value={editingBooking.address}
-                      onChange={(e) =>
-                        setEditingBooking({ ...editingBooking, address: e.target.value })
-                      }
-                      className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label htmlFor="edit-scooter" className="text-xs font-semibold">
-                      Scooter Model
-                    </label>
-                    <input
-                      id="edit-scooter"
-                      type="text"
-                      value={editingBooking.scooterModel}
-                      onChange={(e) =>
-                        setEditingBooking({ ...editingBooking, scooterModel: e.target.value })
-                      }
-                      className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label htmlFor="edit-admin-notes" className="text-xs font-semibold">
-                    Internal Mechanic Notes (Private — Admin Only)
-                  </label>
-                  <textarea
-                    id="edit-admin-notes"
-                    rows={3}
-                    value={editingBooking.adminNotes}
-                    onChange={(e) =>
-                      setEditingBooking({ ...editingBooking, adminNotes: e.target.value })
-                    }
-                    placeholder="Parts ordered, torque specs, diagnostic findings, payment note..."
-                    className="w-full p-3 rounded-[10px] bg-white border border-black/15 text-sm"
-                  />
-                </div>
-
+                <p className="text-xs text-[#52525B]">
+                  This booking is currently hidden by your active filter. Clear filters to view its
+                  card, or save changes here.
+                </p>
                 <div className="flex items-center justify-end gap-3">
                   <button
                     type="button"
-                    onClick={() => setEditingBooking(null)}
-                    className="min-h-[42px] px-4 py-2 rounded-[10px] border border-black/15 text-xs font-semibold cursor-pointer"
+                    onClick={() => {
+                      setStatusFilter('all');
+                      setBookingSearch('');
+                    }}
+                    className="min-h-[40px] px-4 py-2 rounded-[10px] border border-black/15 text-xs font-semibold cursor-pointer"
                   >
-                    Cancel
+                    Show Booking Card
                   </button>
                   <button
-                    type="submit"
-                    disabled={savingBooking}
-                    className="min-h-[42px] px-5 py-2 rounded-[10px] bg-[#E8452C] hover:bg-[#D53A22] text-white text-xs font-semibold inline-flex items-center gap-2 cursor-pointer"
+                    type="button"
+                    onClick={() => setEditingBooking(null)}
+                    className="min-h-[40px] px-4 py-2 rounded-[10px] bg-[#121214] text-white text-xs font-semibold cursor-pointer"
                   >
-                    <Save className="w-3.5 h-3.5" aria-hidden="true" />
-                    {savingBooking ? 'Saving...' : 'Save Changes'}
+                    Close
                   </button>
                 </div>
               </form>
@@ -1226,14 +1134,15 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                   const isUpdatingThis = updatingStatusId === b.id;
                   const isConfirmOpen = confirmingBookingId === b.id;
                   const isMessagesOpen = messagingBookingId === b.id;
+                  const isEditingThis = editingBooking?.id === b.id;
                   const isSelected = selectedBookingIds.includes(b.id);
                   const sentLabel = formatConfirmationTimestamp(b.confirmationSentAt);
                   const scheduleLabel = formatBookingDate(b.bookingDate, b.preferredDay);
                   return (
-                    <div key={b.id} className="space-y-3">
+                    <div key={b.id} id={`booking-card-${b.id}`} className="space-y-3">
                       <article
                         className={`rounded-[18px] bg-[#131316] border p-5 flex flex-col xl:flex-row xl:items-center justify-between gap-5 transition-colors ${
-                          isSelected ? 'border-[#E8452C]/60' : 'border-white/10'
+                          isEditingThis || isSelected ? 'border-[#E8452C]/60' : 'border-white/10'
                         }`}
                       >
                         <div className="flex items-start gap-3.5 min-w-0">
@@ -1324,6 +1233,7 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                           <button
                             type="button"
                             onClick={() => {
+                              setEditingBooking(null);
                               setMessagingBookingId(null);
                               setConfirmingBookingId(isConfirmOpen ? null : b.id);
                             }}
@@ -1343,10 +1253,11 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                                 : 'Send Confirmation'}
                           </button>
 
-                          {/* Customer Messages Button */}
+                          {/* Customer Updates & Chat Button */}
                           <button
                             type="button"
                             onClick={() => {
+                              setEditingBooking(null);
                               setConfirmingBookingId(null);
                               setMessagingBookingId(isMessagesOpen ? null : b.id);
                             }}
@@ -1357,7 +1268,7 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                             }`}
                           >
                             <MessageSquare className="w-3.5 h-3.5" aria-hidden="true" />
-                            {isMessagesOpen ? 'Hide Messages' : 'Messages'}
+                            {isMessagesOpen ? 'Hide Updates' : 'Updates & Chat'}
                           </button>
 
                           <button
@@ -1365,11 +1276,16 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                             onClick={() => {
                               setConfirmingBookingId(null);
                               setMessagingBookingId(null);
-                              setEditingBooking(b);
+                              setEditCustomerUpdate('');
+                              setEditingBooking(isEditingThis ? null : { ...b });
                             }}
-                            className="min-h-[38px] px-3.5 py-1.5 rounded-[10px] bg-[#F4F4F0] text-[#121214] text-xs font-semibold hover:bg-white cursor-pointer"
+                            className={`min-h-[38px] px-3.5 py-1.5 rounded-[10px] text-xs font-semibold cursor-pointer transition-colors ${
+                              isEditingThis
+                                ? 'bg-white text-[#121214] ring-2 ring-[#E8452C]/50'
+                                : 'bg-[#F4F4F0] text-[#121214] hover:bg-white'
+                            }`}
                           >
-                            Edit Details
+                            {isEditingThis ? 'Close Editor' : 'Edit Details'}
                           </button>
 
                           {confirmDeleteBookingId === b.id ? (
@@ -1402,6 +1318,258 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                         </div>
                       </article>
 
+                      {isEditingThis && editingBooking && (
+                        <form
+                          onSubmit={handleSaveBookingEdit}
+                          className="rounded-[20px] bg-[#F4F4F0] text-[#121214] p-5 sm:p-6 border border-black/15 space-y-5"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-black/10 pb-3">
+                            <div>
+                              <span className="font-mono text-xs text-[#52525B]">
+                                EDITING BOOKING
+                              </span>
+                              <h2 className="text-lg font-semibold">
+                                {editingBooking.referenceId} · {editingBooking.riderName}
+                              </h2>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setEditingBooking(null)}
+                              className="text-xs font-semibold text-[#52525B] hover:text-[#121214] cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                            <div className="space-y-1">
+                              <label htmlFor={`edit-status-${b.id}`} className="text-xs font-semibold">
+                                Status
+                              </label>
+                              <select
+                                id={`edit-status-${b.id}`}
+                                value={editingBooking.status}
+                                onChange={(e) =>
+                                  setEditingBooking({
+                                    ...editingBooking,
+                                    status: e.target.value as BookingStatus,
+                                  })
+                                }
+                                className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
+                              >
+                                {BOOKING_STATUSES.map((st) => (
+                                  <option key={st} value={st}>
+                                    {STATUS_LABELS[st]}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="space-y-1">
+                              <label
+                                htmlFor={`edit-booking-date-${b.id}`}
+                                className="text-xs font-semibold"
+                              >
+                                Appointment Date
+                              </label>
+                              <input
+                                id={`edit-booking-date-${b.id}`}
+                                type="date"
+                                value={editingBooking.bookingDate ?? ''}
+                                onChange={(e) => {
+                                  const nextDate = e.target.value;
+                                  const derivedDay = nextDate
+                                    ? getOperatingDayFromDateKey(nextDate)
+                                    : null;
+                                  setEditingBooking({
+                                    ...editingBooking,
+                                    bookingDate: nextDate || undefined,
+                                    preferredDay: derivedDay ?? editingBooking.preferredDay,
+                                  });
+                                }}
+                                className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm tabular-nums"
+                              />
+                            </div>
+
+                            <div className="space-y-1">
+                              <label htmlFor={`edit-day-${b.id}`} className="text-xs font-semibold">
+                                Scheduled Day
+                              </label>
+                              <select
+                                id={`edit-day-${b.id}`}
+                                value={editingBooking.preferredDay}
+                                onChange={(e) =>
+                                  setEditingBooking({
+                                    ...editingBooking,
+                                    preferredDay: e.target.value as OperatingDay,
+                                  })
+                                }
+                                className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
+                              >
+                                {OPERATING_DAYS.map((day) => (
+                                  <option key={day} value={day}>
+                                    {day}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="space-y-1">
+                              <label htmlFor={`edit-window-${b.id}`} className="text-xs font-semibold">
+                                Time Window
+                              </label>
+                              <select
+                                id={`edit-window-${b.id}`}
+                                value={editingBooking.preferredWindow}
+                                onChange={(e) =>
+                                  setEditingBooking({
+                                    ...editingBooking,
+                                    preferredWindow: e.target.value as TimeWindow,
+                                  })
+                                }
+                                className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
+                              >
+                                {TIME_WINDOWS.map((slot) => (
+                                  <option key={slot} value={slot}>
+                                    {slot}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="space-y-1">
+                              <label
+                                htmlFor={`edit-estimate-${b.id}`}
+                                className="text-xs font-semibold"
+                              >
+                                Quoted Labor Label
+                              </label>
+                              <input
+                                id={`edit-estimate-${b.id}`}
+                                type="text"
+                                value={editingBooking.estimatedLaborLabel}
+                                onChange={(e) =>
+                                  setEditingBooking({
+                                    ...editingBooking,
+                                    estimatedLaborLabel: e.target.value,
+                                  })
+                                }
+                                className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="space-y-1">
+                              <label
+                                htmlFor={`edit-address-${b.id}`}
+                                className="text-xs font-semibold"
+                              >
+                                Service Address
+                              </label>
+                              <input
+                                id={`edit-address-${b.id}`}
+                                type="text"
+                                value={editingBooking.address}
+                                onChange={(e) =>
+                                  setEditingBooking({ ...editingBooking, address: e.target.value })
+                                }
+                                className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
+                              />
+                            </div>
+
+                            <div className="space-y-1">
+                              <label
+                                htmlFor={`edit-scooter-${b.id}`}
+                                className="text-xs font-semibold"
+                              >
+                                Scooter Model
+                              </label>
+                              <input
+                                id={`edit-scooter-${b.id}`}
+                                type="text"
+                                value={editingBooking.scooterModel}
+                                onChange={(e) =>
+                                  setEditingBooking({
+                                    ...editingBooking,
+                                    scooterModel: e.target.value,
+                                  })
+                                }
+                                className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <div className="space-y-1">
+                              <label
+                                htmlFor={`edit-admin-notes-${b.id}`}
+                                className="text-xs font-semibold"
+                              >
+                                Internal Mechanic Notes (Private — Admin Only)
+                              </label>
+                              <textarea
+                                id={`edit-admin-notes-${b.id}`}
+                                rows={3}
+                                value={editingBooking.adminNotes}
+                                onChange={(e) =>
+                                  setEditingBooking({
+                                    ...editingBooking,
+                                    adminNotes: e.target.value,
+                                  })
+                                }
+                                placeholder="Private parts cost, torque specs, diagnostic findings..."
+                                className="w-full p-3 rounded-[10px] bg-white border border-black/15 text-sm"
+                              />
+                            </div>
+
+                            <div className="space-y-1">
+                              <label
+                                htmlFor={`edit-customer-update-${b.id}`}
+                                className="text-xs font-semibold text-[#C82A14]"
+                              >
+                                Post Scooter Repair Update to Customer (Optional — Live in My
+                                Account)
+                              </label>
+                              <textarea
+                                id={`edit-customer-update-${b.id}`}
+                                rows={3}
+                                maxLength={1500}
+                                value={editCustomerUpdate}
+                                onChange={(e) => setEditCustomerUpdate(e.target.value)}
+                                placeholder="e.g. Replaced rear inner tube, adjusted rear brake caliper, waiting on replacement throttle..."
+                                className="w-full p-3 rounded-[10px] bg-white border border-[#E8452C]/35 text-sm"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-end gap-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingBooking(null);
+                                setEditCustomerUpdate('');
+                              }}
+                              className="min-h-[40px] px-4 py-2 rounded-[10px] border border-black/15 text-xs font-semibold cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={savingBooking}
+                              className="min-h-[40px] px-5 py-2 rounded-[10px] bg-[#E8452C] hover:bg-[#D53A22] text-white text-xs font-semibold inline-flex items-center gap-2 cursor-pointer"
+                            >
+                              <Save className="w-3.5 h-3.5" aria-hidden="true" />
+                              {savingBooking
+                                ? 'Saving...'
+                                : editCustomerUpdate.trim()
+                                  ? 'Save & Post Repair Update'
+                                  : 'Save Changes'}
+                            </button>
+                          </div>
+                        </form>
+                      )}
+
                       {isConfirmOpen && (
                         <BookingConfirmationModal
                           booking={b}
@@ -1422,6 +1590,12 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                           viewerName={settings.businessName}
                           businessName={settings.businessName}
                           surface="light"
+                          onUpdateStatus={async (nextStatus) => {
+                            await updateAdminBookingStatus(b.id, nextStatus);
+                            showToast(
+                              `Updated ${b.referenceId} status to ${STATUS_LABELS[nextStatus]}.`,
+                            );
+                          }}
                         />
                       )}
                     </div>
@@ -1439,22 +1613,31 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
             updatingStatusId={updatingStatusId}
             onQuickStatusChange={handleQuickStatusChange}
             onEditBooking={(b) => {
+              setStatusFilter('all');
+              setBookingSearch('');
               setConfirmingBookingId(null);
               setMessagingBookingId(null);
-              setEditingBooking(b);
+              setEditingBooking({ ...b });
               setActiveTab('bookings');
+              scrollToBookingCard(b.id);
             }}
             onOpenConfirm={(b) => {
+              setStatusFilter('all');
+              setBookingSearch('');
               setEditingBooking(null);
               setMessagingBookingId(null);
               setConfirmingBookingId(b.id);
               setActiveTab('bookings');
+              scrollToBookingCard(b.id);
             }}
             onOpenMessages={(b) => {
+              setStatusFilter('all');
+              setBookingSearch('');
               setEditingBooking(null);
               setConfirmingBookingId(null);
               setMessagingBookingId(b.id);
               setActiveTab('bookings');
+              scrollToBookingCard(b.id);
             }}
             onDeleteBooking={handleDeleteBooking}
           />
@@ -1498,16 +1681,19 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
               </button>
             </div>
 
-            {editingCustomer && (
+            {editingCustomer && editingCustomerKey === '__new__' && (
               <form
                 onSubmit={handleSaveCustomer}
                 className="rounded-[22px] bg-[#F4F4F0] text-[#121214] p-6 border border-black/15 space-y-4"
               >
                 <div className="flex items-center justify-between border-b border-black/10 pb-3">
-                  <h2 className="text-lg font-semibold">Customer Equipment & Contact Profile</h2>
+                  <h2 className="text-lg font-semibold">New Customer Equipment & Contact Profile</h2>
                   <button
                     type="button"
-                    onClick={() => setEditingCustomer(null)}
+                    onClick={() => {
+                      setEditingCustomer(null);
+                      setEditingCustomerKey(null);
+                    }}
                     className="text-xs font-semibold text-[#52525B] cursor-pointer"
                   >
                     Cancel
@@ -1516,11 +1702,11 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="space-y-1">
-                    <label htmlFor="cust-name" className="text-xs font-semibold">
+                    <label htmlFor="cust-new-name" className="text-xs font-semibold">
                       Full Name
                     </label>
                     <input
-                      id="cust-name"
+                      id="cust-new-name"
                       type="text"
                       required
                       value={editingCustomer.name}
@@ -1531,11 +1717,11 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                     />
                   </div>
                   <div className="space-y-1">
-                    <label htmlFor="cust-email" className="text-xs font-semibold">
+                    <label htmlFor="cust-new-email" className="text-xs font-semibold">
                       Email
                     </label>
                     <input
-                      id="cust-email"
+                      id="cust-new-email"
                       type="email"
                       required
                       value={editingCustomer.email}
@@ -1546,11 +1732,11 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                     />
                   </div>
                   <div className="space-y-1">
-                    <label htmlFor="cust-phone" className="text-xs font-semibold">
+                    <label htmlFor="cust-new-phone" className="text-xs font-semibold">
                       Phone
                     </label>
                     <input
-                      id="cust-phone"
+                      id="cust-new-phone"
                       type="tel"
                       required
                       value={editingCustomer.phone}
@@ -1564,11 +1750,11 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="space-y-1">
-                    <label htmlFor="cust-address" className="text-xs font-semibold">
+                    <label htmlFor="cust-new-address" className="text-xs font-semibold">
                       Service Address
                     </label>
                     <input
-                      id="cust-address"
+                      id="cust-new-address"
                       type="text"
                       value={editingCustomer.address}
                       onChange={(e) =>
@@ -1578,11 +1764,11 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                     />
                   </div>
                   <div className="space-y-1">
-                    <label htmlFor="cust-scooter" className="text-xs font-semibold">
+                    <label htmlFor="cust-new-scooter" className="text-xs font-semibold">
                       Scooter Model
                     </label>
                     <input
-                      id="cust-scooter"
+                      id="cust-new-scooter"
                       type="text"
                       value={editingCustomer.scooterModel}
                       onChange={(e) =>
@@ -1592,11 +1778,11 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                     />
                   </div>
                   <div className="space-y-1">
-                    <label htmlFor="cust-serial" className="text-xs font-semibold">
+                    <label htmlFor="cust-new-serial" className="text-xs font-semibold">
                       Serial Number / VIN
                     </label>
                     <input
-                      id="cust-serial"
+                      id="cust-new-serial"
                       type="text"
                       value={editingCustomer.serialNumber}
                       onChange={(e) =>
@@ -1608,11 +1794,11 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                 </div>
 
                 <div className="space-y-1">
-                  <label htmlFor="cust-notes" className="text-xs font-semibold">
+                  <label htmlFor="cust-new-notes" className="text-xs font-semibold">
                     Mechanic Service History & Notes
                   </label>
                   <textarea
-                    id="cust-notes"
+                    id="cust-new-notes"
                     rows={3}
                     value={editingCustomer.mechanicNotes}
                     onChange={(e) =>
@@ -1625,7 +1811,10 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                 <div className="flex justify-end gap-3">
                   <button
                     type="button"
-                    onClick={() => setEditingCustomer(null)}
+                    onClick={() => {
+                      setEditingCustomer(null);
+                      setEditingCustomerKey(null);
+                    }}
                     className="min-h-[40px] px-4 py-2 rounded-[10px] border border-black/15 text-xs font-semibold cursor-pointer"
                   >
                     Cancel
@@ -1711,118 +1900,324 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
                   {aggregatedCustomers.map((cust) => {
                     const isConfirmingDelete = confirmDeleteCustomerKey === cust.key;
                     const isDeletingThis = deletingCustomerKey === cust.key;
+                    const isEditingThis =
+                      editingCustomer !== null && editingCustomerKey === cust.key;
                     const isSelected = selectedCustomerKeys.includes(cust.key);
                     return (
-                      <article
-                        key={cust.key}
-                        className={`rounded-[18px] bg-[#131316] border p-5 flex flex-col justify-between gap-4 transition-colors ${
-                          isSelected ? 'border-[#E8452C]/60' : 'border-white/10'
-                        }`}
-                      >
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between gap-2 font-mono text-[11px] text-[#A1A1AA]">
-                            <label className="inline-flex items-center gap-2 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                aria-label={`Select customer ${cust.name}`}
-                                checked={isSelected}
-                                onChange={() => toggleCustomerSelection(cust.key)}
-                                className="w-4 h-4 accent-[#E8452C] cursor-pointer"
-                              />
-                              <span>
-                                {cust.bookingCount} BOOKING{cust.bookingCount === 1 ? '' : 'S'} · LAST{' '}
-                                {cust.lastBookingRef}
-                              </span>
-                            </label>
-                            <span>{cust.hasSavedProfile ? 'SAVED CRM' : 'FROM BOOKING'}</span>
+                      <div key={cust.key} className="space-y-3">
+                        <article
+                          className={`rounded-[18px] bg-[#131316] border p-5 flex flex-col justify-between gap-4 transition-colors ${
+                            isEditingThis || isSelected ? 'border-[#E8452C]/60' : 'border-white/10'
+                          }`}
+                        >
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-2 font-mono text-[11px] text-[#A1A1AA]">
+                              <label className="inline-flex items-center gap-2 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  aria-label={`Select customer ${cust.name}`}
+                                  checked={isSelected}
+                                  onChange={() => toggleCustomerSelection(cust.key)}
+                                  className="w-4 h-4 accent-[#E8452C] cursor-pointer"
+                                />
+                                <span>
+                                  {cust.bookingCount} BOOKING{cust.bookingCount === 1 ? '' : 'S'} ·
+                                  LAST {cust.lastBookingRef}
+                                </span>
+                              </label>
+                              <span>{cust.hasSavedProfile ? 'SAVED CRM' : 'FROM BOOKING'}</span>
+                            </div>
+                            <h3 className="text-base font-semibold text-[#F4F4F0]">{cust.name}</h3>
+                            <p className="text-xs text-[#D4D4D8]">
+                              {cust.phone} · {cust.email}
+                            </p>
+                            <p className="text-xs text-[#A1A1AA]">
+                              Scooter: {cust.scooterModel || '—'}
+                              {cust.serialNumber ? ` · S/N ${cust.serialNumber}` : ''}
+                            </p>
+                            {cust.address && (
+                              <p className="text-xs text-[#A1A1AA]">Address: {cust.address}</p>
+                            )}
+                            {cust.mechanicNotes && (
+                              <p className="text-xs text-[#4A82E8]">Notes: {cust.mechanicNotes}</p>
+                            )}
                           </div>
-                          <h3 className="text-base font-semibold text-[#F4F4F0]">{cust.name}</h3>
-                          <p className="text-xs text-[#D4D4D8]">
-                            {cust.phone} · {cust.email}
-                          </p>
-                          <p className="text-xs text-[#A1A1AA]">
-                            Scooter: {cust.scooterModel || '—'}
-                            {cust.serialNumber ? ` · S/N ${cust.serialNumber}` : ''}
-                          </p>
-                          {cust.address && (
-                            <p className="text-xs text-[#A1A1AA]">Address: {cust.address}</p>
-                          )}
-                          {cust.mechanicNotes && (
-                            <p className="text-xs text-[#4A82E8]">Notes: {cust.mechanicNotes}</p>
-                          )}
-                        </div>
 
-                        <div className="pt-3 border-t border-white/10 space-y-2.5">
-                          {isConfirmingDelete ? (
-                            <div className="rounded-[12px] bg-[#1A1416] border border-[#E8452C]/35 p-3 space-y-2.5">
-                              <p className="text-xs text-[#FCA5A5]">
-                                {cust.bookingCount > 0
-                                  ? `Delete ${cust.name}? Removing all ${cust.bookingCount} booking${
-                                      cust.bookingCount === 1 ? '' : 's'
-                                    } permanently removes them from this list.`
-                                  : `Permanently delete customer profile for ${cust.name}?`}
-                              </p>
-                              <div className="flex flex-wrap items-center gap-2">
-                                {cust.hasSavedProfile && cust.bookingCount > 0 && (
+                          <div className="pt-3 border-t border-white/10 space-y-2.5">
+                            {isConfirmingDelete ? (
+                              <div className="rounded-[12px] bg-[#1A1416] border border-[#E8452C]/35 p-3 space-y-2.5">
+                                <p className="text-xs text-[#FCA5A5]">
+                                  {cust.bookingCount > 0
+                                    ? `Delete ${cust.name}? Removing all ${cust.bookingCount} booking${
+                                        cust.bookingCount === 1 ? '' : 's'
+                                      } permanently removes them from this list.`
+                                    : `Permanently delete customer profile for ${cust.name}?`}
+                                </p>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  {cust.hasSavedProfile && cust.bookingCount > 0 && (
+                                    <button
+                                      type="button"
+                                      disabled={isDeletingThis}
+                                      onClick={() => handleDeleteCustomer(cust, 'profile_only')}
+                                      className="min-h-[34px] px-3 py-1 rounded-[9px] border border-white/20 text-xs font-semibold text-[#F4F4F0] hover:bg-white/10 disabled:opacity-50 cursor-pointer"
+                                    >
+                                      Delete CRM Profile Only
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     disabled={isDeletingThis}
-                                    onClick={() => handleDeleteCustomer(cust, 'profile_only')}
-                                    className="min-h-[34px] px-3 py-1 rounded-[9px] border border-white/20 text-xs font-semibold text-[#F4F4F0] hover:bg-white/10 disabled:opacity-50 cursor-pointer"
+                                    onClick={() =>
+                                      handleDeleteCustomer(cust, 'customer_and_bookings')
+                                    }
+                                    className="min-h-[34px] px-3 py-1 rounded-[9px] bg-[#E8452C] hover:bg-[#D53A22] disabled:opacity-50 text-white text-xs font-semibold cursor-pointer"
                                   >
-                                    Delete CRM Profile Only
+                                    {isDeletingThis
+                                      ? 'Deleting...'
+                                      : cust.bookingCount > 0
+                                        ? `Delete Customer & ${cust.bookingCount} Booking${
+                                            cust.bookingCount === 1 ? '' : 's'
+                                          }`
+                                        : 'Confirm Delete Customer'}
                                   </button>
-                                )}
+                                  <button
+                                    type="button"
+                                    disabled={isDeletingThis}
+                                    onClick={() => setConfirmDeleteCustomerKey(null)}
+                                    className="min-h-[34px] px-2.5 py-1 rounded-[9px] border border-white/15 text-xs text-[#A1A1AA] cursor-pointer"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-between gap-3">
                                 <button
                                   type="button"
-                                  disabled={isDeletingThis}
-                                  onClick={() => handleDeleteCustomer(cust, 'customer_and_bookings')}
-                                  className="min-h-[34px] px-3 py-1 rounded-[9px] bg-[#E8452C] hover:bg-[#D53A22] disabled:opacity-50 text-white text-xs font-semibold cursor-pointer"
+                                  onClick={() => handleOpenCustomerEditor(cust)}
+                                  className={`min-h-[38px] px-3.5 py-1.5 rounded-[10px] text-xs font-semibold cursor-pointer transition-colors ${
+                                    isEditingThis
+                                      ? 'bg-white text-[#121214] ring-2 ring-[#E8452C]/50'
+                                      : 'bg-[#F4F4F0] text-[#121214] hover:bg-white'
+                                  }`}
                                 >
-                                  {isDeletingThis
-                                    ? 'Deleting...'
-                                    : cust.bookingCount > 0
-                                      ? `Delete Customer & ${cust.bookingCount} Booking${
-                                          cust.bookingCount === 1 ? '' : 's'
-                                        }`
-                                      : 'Confirm Delete Customer'}
+                                  {isEditingThis
+                                    ? 'Close Editor'
+                                    : cust.hasSavedProfile
+                                      ? 'Edit Profile'
+                                      : 'Save to CRM'}
                                 </button>
                                 <button
                                   type="button"
-                                  disabled={isDeletingThis}
-                                  onClick={() => setConfirmDeleteCustomerKey(null)}
-                                  className="min-h-[34px] px-2.5 py-1 rounded-[9px] border border-white/15 text-xs text-[#A1A1AA] cursor-pointer"
+                                  aria-label={`Delete customer ${cust.name}`}
+                                  onClick={() => setConfirmDeleteCustomerKey(cust.key)}
+                                  className="min-h-[38px] px-3 py-1.5 rounded-[10px] border border-white/15 text-xs font-semibold text-[#A1A1AA] hover:text-[#E8452C] hover:border-[#E8452C] inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                                 >
-                                  Cancel
+                                  <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                                  Delete
                                 </button>
                               </div>
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-between gap-3">
+                            )}
+                          </div>
+                        </article>
+
+                        {isEditingThis && editingCustomer && (
+                          <form
+                            onSubmit={handleSaveCustomer}
+                            className="rounded-[18px] bg-[#F4F4F0] text-[#121214] p-5 border border-black/15 space-y-4"
+                          >
+                            <div className="flex items-center justify-between border-b border-black/10 pb-2.5">
+                              <div>
+                                <span className="font-mono text-[11px] text-[#52525B]">
+                                  EDITING CUSTOMER
+                                </span>
+                                <h3 className="text-base font-semibold">
+                                  {editingCustomer.name || cust.name}
+                                </h3>
+                              </div>
                               <button
                                 type="button"
-                                onClick={() => handleOpenCustomerEditor(cust)}
-                                className="min-h-[38px] px-3.5 py-1.5 rounded-[10px] bg-[#F4F4F0] text-[#121214] text-xs font-semibold hover:bg-white cursor-pointer"
+                                onClick={() => {
+                                  setEditingCustomer(null);
+                                  setEditingCustomerKey(null);
+                                }}
+                                className="text-xs font-semibold text-[#52525B] hover:text-[#121214] cursor-pointer"
                               >
-                                {cust.hasSavedProfile ? 'Edit Profile' : 'Save to CRM'}
-                              </button>
-                              <button
-                                type="button"
-                                aria-label={`Delete customer ${cust.name}`}
-                                onClick={() => setConfirmDeleteCustomerKey(cust.key)}
-                                className="min-h-[38px] px-3 py-1.5 rounded-[10px] border border-white/15 text-xs font-semibold text-[#A1A1AA] hover:text-[#E8452C] hover:border-[#E8452C] inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                                Delete
+                                Cancel
                               </button>
                             </div>
-                          )}
-                        </div>
-                      </article>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label
+                                  htmlFor={`cust-name-${cust.key}`}
+                                  className="text-xs font-semibold"
+                                >
+                                  Full Name
+                                </label>
+                                <input
+                                  id={`cust-name-${cust.key}`}
+                                  type="text"
+                                  required
+                                  value={editingCustomer.name}
+                                  onChange={(e) =>
+                                    setEditingCustomer({ ...editingCustomer, name: e.target.value })
+                                  }
+                                  className="w-full min-h-[38px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label
+                                  htmlFor={`cust-email-${cust.key}`}
+                                  className="text-xs font-semibold"
+                                >
+                                  Email
+                                </label>
+                                <input
+                                  id={`cust-email-${cust.key}`}
+                                  type="email"
+                                  required
+                                  value={editingCustomer.email}
+                                  onChange={(e) =>
+                                    setEditingCustomer({
+                                      ...editingCustomer,
+                                      email: e.target.value,
+                                    })
+                                  }
+                                  className="w-full min-h-[38px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label
+                                  htmlFor={`cust-phone-${cust.key}`}
+                                  className="text-xs font-semibold"
+                                >
+                                  Phone
+                                </label>
+                                <input
+                                  id={`cust-phone-${cust.key}`}
+                                  type="tel"
+                                  required
+                                  value={editingCustomer.phone}
+                                  onChange={(e) =>
+                                    setEditingCustomer({
+                                      ...editingCustomer,
+                                      phone: e.target.value,
+                                    })
+                                  }
+                                  className="w-full min-h-[38px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label
+                                  htmlFor={`cust-scooter-${cust.key}`}
+                                  className="text-xs font-semibold"
+                                >
+                                  Scooter Model
+                                </label>
+                                <input
+                                  id={`cust-scooter-${cust.key}`}
+                                  type="text"
+                                  value={editingCustomer.scooterModel}
+                                  onChange={(e) =>
+                                    setEditingCustomer({
+                                      ...editingCustomer,
+                                      scooterModel: e.target.value,
+                                    })
+                                  }
+                                  className="w-full min-h-[38px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label
+                                  htmlFor={`cust-address-${cust.key}`}
+                                  className="text-xs font-semibold"
+                                >
+                                  Service Address
+                                </label>
+                                <input
+                                  id={`cust-address-${cust.key}`}
+                                  type="text"
+                                  value={editingCustomer.address}
+                                  onChange={(e) =>
+                                    setEditingCustomer({
+                                      ...editingCustomer,
+                                      address: e.target.value,
+                                    })
+                                  }
+                                  className="w-full min-h-[38px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label
+                                  htmlFor={`cust-serial-${cust.key}`}
+                                  className="text-xs font-semibold"
+                                >
+                                  Serial Number / VIN
+                                </label>
+                                <input
+                                  id={`cust-serial-${cust.key}`}
+                                  type="text"
+                                  value={editingCustomer.serialNumber}
+                                  onChange={(e) =>
+                                    setEditingCustomer({
+                                      ...editingCustomer,
+                                      serialNumber: e.target.value,
+                                    })
+                                  }
+                                  className="w-full min-h-[38px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="space-y-1">
+                              <label
+                                htmlFor={`cust-notes-${cust.key}`}
+                                className="text-xs font-semibold"
+                              >
+                                Mechanic Service History & Notes
+                              </label>
+                              <textarea
+                                id={`cust-notes-${cust.key}`}
+                                rows={3}
+                                value={editingCustomer.mechanicNotes}
+                                onChange={(e) =>
+                                  setEditingCustomer({
+                                    ...editingCustomer,
+                                    mechanicNotes: e.target.value,
+                                  })
+                                }
+                                className="w-full p-3 rounded-[10px] bg-white border border-black/15 text-sm"
+                              />
+                            </div>
+
+                            <div className="flex justify-end gap-2.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingCustomer(null);
+                                  setEditingCustomerKey(null);
+                                }}
+                                className="min-h-[38px] px-4 py-1.5 rounded-[10px] border border-black/15 text-xs font-semibold cursor-pointer"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="submit"
+                                disabled={savingCustomer}
+                                className="min-h-[38px] px-4 py-1.5 rounded-[10px] bg-[#E8452C] hover:bg-[#D53A22] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                              >
+                                <Save className="w-3.5 h-3.5" aria-hidden="true" />
+                                {savingCustomer ? 'Saving...' : 'Save Customer'}
+                              </button>
+                            </div>
+                          </form>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
@@ -1871,7 +2266,7 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                 </div>
               </div>
 
-              {editingService && (
+              {editingService && editingServiceIsNew && (
                 <form
                   onSubmit={handleSaveService}
                   className="rounded-[22px] bg-[#F4F4F0] text-[#121214] p-6 border border-black/15 space-y-4"
@@ -1882,7 +2277,10 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                     </h3>
                     <button
                       type="button"
-                      onClick={() => setEditingService(null)}
+                      onClick={() => {
+                        setEditingService(null);
+                        setEditingServiceIsNew(false);
+                      }}
                       className="text-xs font-semibold text-[#52525B] cursor-pointer"
                     >
                       Cancel
@@ -1891,11 +2289,11 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     <div className="space-y-1 sm:col-span-2">
-                      <label htmlFor="svc-title" className="text-xs font-semibold">
+                      <label htmlFor="svc-new-title" className="text-xs font-semibold">
                         Service Title
                       </label>
                       <input
-                        id="svc-title"
+                        id="svc-new-title"
                         type="text"
                         required
                         value={editingService.title}
@@ -1906,11 +2304,11 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                       />
                     </div>
                     <div className="space-y-1">
-                      <label htmlFor="svc-price" className="text-xs font-semibold">
+                      <label htmlFor="svc-new-price" className="text-xs font-semibold">
                         Price ($)
                       </label>
                       <input
-                        id="svc-price"
+                        id="svc-new-price"
                         type="number"
                         min={0}
                         max={2000}
@@ -1922,11 +2320,11 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                       />
                     </div>
                     <div className="space-y-1">
-                      <label htmlFor="svc-pricing-type" className="text-xs font-semibold">
+                      <label htmlFor="svc-new-pricing-type" className="text-xs font-semibold">
                         Pricing Type
                       </label>
                       <select
-                        id="svc-pricing-type"
+                        id="svc-new-pricing-type"
                         value={editingService.pricingType}
                         onChange={(e) =>
                           setEditingService({
@@ -1945,11 +2343,11 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
 
                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                     <div className="space-y-1">
-                      <label htmlFor="svc-short" className="text-xs font-semibold">
+                      <label htmlFor="svc-new-short" className="text-xs font-semibold">
                         Short Label
                       </label>
                       <input
-                        id="svc-short"
+                        id="svc-new-short"
                         type="text"
                         value={editingService.shortLabel}
                         onChange={(e) =>
@@ -1959,11 +2357,11 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                       />
                     </div>
                     <div className="space-y-1">
-                      <label htmlFor="svc-cat" className="text-xs font-semibold">
+                      <label htmlFor="svc-new-cat" className="text-xs font-semibold">
                         Category
                       </label>
                       <select
-                        id="svc-cat"
+                        id="svc-new-cat"
                         value={editingService.category}
                         onChange={(e) =>
                           setEditingService({
@@ -1980,11 +2378,11 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                       </select>
                     </div>
                     <div className="space-y-1">
-                      <label htmlFor="svc-mins" className="text-xs font-semibold">
+                      <label htmlFor="svc-new-mins" className="text-xs font-semibold">
                         Est. Minutes
                       </label>
                       <input
-                        id="svc-mins"
+                        id="svc-new-mins"
                         type="number"
                         min={5}
                         max={480}
@@ -2014,11 +2412,11 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                   </div>
 
                   <div className="space-y-1">
-                    <label htmlFor="svc-summary" className="text-xs font-semibold">
+                    <label htmlFor="svc-new-summary" className="text-xs font-semibold">
                       Summary
                     </label>
                     <textarea
-                      id="svc-summary"
+                      id="svc-new-summary"
                       rows={2}
                       value={editingService.summary}
                       onChange={(e) =>
@@ -2029,11 +2427,11 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                   </div>
 
                   <div className="space-y-1">
-                    <label htmlFor="svc-includes" className="text-xs font-semibold">
+                    <label htmlFor="svc-new-includes" className="text-xs font-semibold">
                       Included Items (One per line)
                     </label>
                     <textarea
-                      id="svc-includes"
+                      id="svc-new-includes"
                       rows={3}
                       value={includesDraftText}
                       onChange={(e) => setIncludesDraftText(e.target.value)}
@@ -2044,7 +2442,10 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                   <div className="flex justify-end gap-3">
                     <button
                       type="button"
-                      onClick={() => setEditingService(null)}
+                      onClick={() => {
+                        setEditingService(null);
+                        setEditingServiceIsNew(false);
+                      }}
                       className="min-h-[40px] px-4 py-2 rounded-[10px] border border-black/15 text-xs font-semibold cursor-pointer"
                     >
                       Cancel
@@ -2060,76 +2461,317 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                 </form>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {services.map((svc) => (
-                  <div
-                    key={svc.id}
-                    className="rounded-[18px] bg-[#131316] border border-white/10 p-5 flex flex-col justify-between gap-4"
-                  >
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between font-mono text-[11px] text-[#A1A1AA]">
-                        <span>
-                          {svc.index} · {svc.categoryLabel}
-                        </span>
-                        <span className={svc.active ? 'text-[#F4F4F0]' : 'text-[#E8452C]'}>
-                          {svc.active ? 'VISIBLE' : 'HIDDEN'}
-                        </span>
-                      </div>
-                      <h3 className="text-base font-semibold text-[#F4F4F0]">{svc.title}</h3>
-                      <div className="font-dot text-2xl font-bold text-[#F4F4F0] tabular-nums">
-                        {formatServicePrice(svc)}
-                      </div>
-                      <p className="text-xs text-[#A1A1AA] line-clamp-2">{svc.summary}</p>
-                    </div>
-
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-white/10">
-                      <button
-                        type="button"
-                        onClick={() => openServiceEditor(svc)}
-                        className="min-h-[36px] px-3.5 py-1.5 rounded-[10px] bg-[#F4F4F0] text-[#121214] text-xs font-semibold hover:bg-white cursor-pointer"
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
+                {services.map((svc) => {
+                  const isEditingThis =
+                    editingService !== null && !editingServiceIsNew && editingService.id === svc.id;
+                  return (
+                    <div key={svc.id} className="space-y-3">
+                      <div
+                        className={`rounded-[18px] bg-[#131316] border p-5 flex flex-col justify-between gap-4 transition-colors ${
+                          isEditingThis ? 'border-[#E8452C]/60' : 'border-white/10'
+                        }`}
                       >
-                        Edit Price / Details
-                      </button>
-                      {confirmDeleteServiceId === svc.id ? (
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              try {
-                                await deleteServiceItem(svc.id);
-                                setConfirmDeleteServiceId(null);
-                                showToast(`Removed ${svc.title}.`);
-                              } catch (err) {
-                                setDataError(
-                                  err instanceof Error ? err.message : 'Failed to delete service.',
-                                );
-                              }
-                            }}
-                            className="min-h-[36px] px-2.5 py-1 rounded-[9px] bg-[#E8452C] text-white text-xs font-semibold cursor-pointer"
-                          >
-                            Confirm Delete
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setConfirmDeleteServiceId(null)}
-                            className="min-h-[36px] px-2.5 py-1 rounded-[9px] border border-white/15 text-xs text-[#A1A1AA] cursor-pointer"
-                          >
-                            Cancel
-                          </button>
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between font-mono text-[11px] text-[#A1A1AA]">
+                            <span>
+                              {svc.index} · {svc.categoryLabel}
+                            </span>
+                            <span className={svc.active ? 'text-[#F4F4F0]' : 'text-[#E8452C]'}>
+                              {svc.active ? 'VISIBLE' : 'HIDDEN'}
+                            </span>
+                          </div>
+                          <h3 className="text-base font-semibold text-[#F4F4F0]">{svc.title}</h3>
+                          <div className="font-dot text-2xl font-bold text-[#F4F4F0] tabular-nums">
+                            {formatServicePrice(svc)}
+                          </div>
+                          <p className="text-xs text-[#A1A1AA] line-clamp-2">{svc.summary}</p>
                         </div>
-                      ) : (
-                        <button
-                          type="button"
-                          aria-label={`Delete ${svc.title}`}
-                          onClick={() => setConfirmDeleteServiceId(svc.id)}
-                          className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center rounded-[10px] border border-white/15 text-[#A1A1AA] hover:text-[#E8452C] hover:border-[#E8452C] cursor-pointer"
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-white/10">
+                          <button
+                            type="button"
+                            onClick={() => openServiceEditor(svc)}
+                            className={`min-h-[36px] px-3.5 py-1.5 rounded-[10px] text-xs font-semibold cursor-pointer transition-colors ${
+                              isEditingThis
+                                ? 'bg-white text-[#121214] ring-2 ring-[#E8452C]/50'
+                                : 'bg-[#F4F4F0] text-[#121214] hover:bg-white'
+                            }`}
+                          >
+                            {isEditingThis ? 'Close Editor' : 'Edit Price / Details'}
+                          </button>
+                          {confirmDeleteServiceId === svc.id ? (
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    await deleteServiceItem(svc.id);
+                                    setConfirmDeleteServiceId(null);
+                                    if (editingService?.id === svc.id) {
+                                      setEditingService(null);
+                                    }
+                                    showToast(`Removed ${svc.title}.`);
+                                  } catch (err) {
+                                    setDataError(
+                                      err instanceof Error
+                                        ? err.message
+                                        : 'Failed to delete service.',
+                                    );
+                                  }
+                                }}
+                                className="min-h-[36px] px-2.5 py-1 rounded-[9px] bg-[#E8452C] text-white text-xs font-semibold cursor-pointer"
+                              >
+                                Confirm Delete
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteServiceId(null)}
+                                className="min-h-[36px] px-2.5 py-1 rounded-[9px] border border-white/15 text-xs text-[#A1A1AA] cursor-pointer"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              aria-label={`Delete ${svc.title}`}
+                              onClick={() => setConfirmDeleteServiceId(svc.id)}
+                              className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center rounded-[10px] border border-white/15 text-[#A1A1AA] hover:text-[#E8452C] hover:border-[#E8452C] cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {isEditingThis && editingService && (
+                        <form
+                          onSubmit={handleSaveService}
+                          className="rounded-[18px] bg-[#F4F4F0] text-[#121214] p-4 sm:p-5 border border-black/15 space-y-3.5"
                         >
-                          <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                        </button>
+                          <div className="flex items-center justify-between border-b border-black/10 pb-2.5">
+                            <span className="font-mono text-[11px] text-[#52525B]">
+                              EDITING SERVICE
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setEditingService(null)}
+                              className="text-xs font-semibold text-[#52525B] hover:text-[#121214] cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label
+                              htmlFor={`svc-title-${svc.id}`}
+                              className="text-xs font-semibold"
+                            >
+                              Service Title
+                            </label>
+                            <input
+                              id={`svc-title-${svc.id}`}
+                              type="text"
+                              required
+                              value={editingService.title}
+                              onChange={(e) =>
+                                setEditingService({ ...editingService, title: e.target.value })
+                              }
+                              className="w-full min-h-[38px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <label
+                                htmlFor={`svc-price-${svc.id}`}
+                                className="text-xs font-semibold"
+                              >
+                                Price ($)
+                              </label>
+                              <input
+                                id={`svc-price-${svc.id}`}
+                                type="number"
+                                min={0}
+                                max={2000}
+                                value={editingService.price}
+                                onChange={(e) =>
+                                  setEditingService({
+                                    ...editingService,
+                                    price: Number(e.target.value),
+                                  })
+                                }
+                                className="w-full min-h-[38px] px-3 rounded-[10px] bg-white border border-black/15 text-sm tabular-nums"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label
+                                htmlFor={`svc-pricing-type-${svc.id}`}
+                                className="text-xs font-semibold"
+                              >
+                                Pricing Type
+                              </label>
+                              <select
+                                id={`svc-pricing-type-${svc.id}`}
+                                value={editingService.pricingType}
+                                onChange={(e) =>
+                                  setEditingService({
+                                    ...editingService,
+                                    pricingType: e.target.value as PricingType,
+                                  })
+                                }
+                                className="w-full min-h-[38px] px-2.5 rounded-[10px] bg-white border border-black/15 text-sm"
+                              >
+                                <option value="fixed">Fixed ($)</option>
+                                <option value="from">From ($)</option>
+                                <option value="hourly">Hourly</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <label
+                                htmlFor={`svc-short-${svc.id}`}
+                                className="text-xs font-semibold"
+                              >
+                                Short Label
+                              </label>
+                              <input
+                                id={`svc-short-${svc.id}`}
+                                type="text"
+                                value={editingService.shortLabel}
+                                onChange={(e) =>
+                                  setEditingService({
+                                    ...editingService,
+                                    shortLabel: e.target.value,
+                                  })
+                                }
+                                className="w-full min-h-[38px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label
+                                htmlFor={`svc-mins-${svc.id}`}
+                                className="text-xs font-semibold"
+                              >
+                                Est. Minutes
+                              </label>
+                              <input
+                                id={`svc-mins-${svc.id}`}
+                                type="number"
+                                min={5}
+                                max={480}
+                                value={editingService.durationMinutes}
+                                onChange={(e) =>
+                                  setEditingService({
+                                    ...editingService,
+                                    durationMinutes: Number(e.target.value),
+                                  })
+                                }
+                                className="w-full min-h-[38px] px-3 rounded-[10px] bg-white border border-black/15 text-sm tabular-nums"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3 items-end">
+                            <div className="space-y-1">
+                              <label
+                                htmlFor={`svc-cat-${svc.id}`}
+                                className="text-xs font-semibold"
+                              >
+                                Category
+                              </label>
+                              <select
+                                id={`svc-cat-${svc.id}`}
+                                value={editingService.category}
+                                onChange={(e) =>
+                                  setEditingService({
+                                    ...editingService,
+                                    category: e.target.value as Exclude<ServiceCategory, 'all'>,
+                                  })
+                                }
+                                className="w-full min-h-[38px] px-2.5 rounded-[10px] bg-white border border-black/15 text-sm"
+                              >
+                                <option value="packages">Packages</option>
+                                <option value="standup">Stand-Up Labor</option>
+                                <option value="electrical">Electrical</option>
+                                <option value="mobility">Mobility</option>
+                              </select>
+                            </div>
+                            <label className="inline-flex items-center gap-2 min-h-[38px] text-xs font-semibold cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={editingService.active}
+                                onChange={(e) =>
+                                  setEditingService({
+                                    ...editingService,
+                                    active: e.target.checked,
+                                  })
+                                }
+                                className="w-4 h-4 accent-[#E8452C]"
+                              />
+                              Visible
+                            </label>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label
+                              htmlFor={`svc-summary-${svc.id}`}
+                              className="text-xs font-semibold"
+                            >
+                              Summary
+                            </label>
+                            <textarea
+                              id={`svc-summary-${svc.id}`}
+                              rows={2}
+                              value={editingService.summary}
+                              onChange={(e) =>
+                                setEditingService({ ...editingService, summary: e.target.value })
+                              }
+                              className="w-full p-2.5 rounded-[10px] bg-white border border-black/15 text-sm"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label
+                              htmlFor={`svc-includes-${svc.id}`}
+                              className="text-xs font-semibold"
+                            >
+                              Included Items (One per line)
+                            </label>
+                            <textarea
+                              id={`svc-includes-${svc.id}`}
+                              rows={3}
+                              value={includesDraftText}
+                              onChange={(e) => setIncludesDraftText(e.target.value)}
+                              className="w-full p-2.5 rounded-[10px] bg-white border border-black/15 text-sm"
+                            />
+                          </div>
+
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setEditingService(null)}
+                              className="min-h-[36px] px-3.5 py-1.5 rounded-[10px] border border-black/15 text-xs font-semibold cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={savingService}
+                              className="min-h-[36px] px-4 py-1.5 rounded-[10px] bg-[#E8452C] hover:bg-[#D53A22] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <Save className="w-3.5 h-3.5" aria-hidden="true" />
+                              {savingService ? 'Saving...' : 'Save Service'}
+                            </button>
+                          </div>
+                        </form>
                       )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>

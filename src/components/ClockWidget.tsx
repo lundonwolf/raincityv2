@@ -16,19 +16,26 @@ export function ClockWidget({ settings }: ClockWidgetProps) {
   }, []);
 
   const schedule = getSeattleScheduleStatus(now);
-  const [hours, minutes] = schedule.timeString.split(':');
   const phoneHref = `tel:+1${settings.phoneDisplay.replace(/\D/g, '')}`;
 
   return (
     <div className="bg-[#F4F4F0] text-[#121214] rounded-[20px] p-5 border border-black/10 grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-5 items-center">
       {/* Left: Dot-matrix Seattle clock inspired by Nothing OS */}
-      <div className="flex items-center gap-4 sm:border-r sm:border-black/10 sm:pr-5">
-        <div className="flex flex-col leading-none">
-          <span className="font-dot text-4xl font-extrabold tracking-tight text-[#121214] tabular-nums">
-            {hours}
-          </span>
-          <span className="font-dot text-4xl font-extrabold tracking-tight text-[#121214] tabular-nums">
-            {minutes}
+      <div className="flex items-center gap-3.5 sm:border-r sm:border-black/10 sm:pr-5">
+        <div
+          className="flex items-end gap-1.5 leading-none"
+          aria-label={`Seattle time ${schedule.timeString}`}
+        >
+          <div className="flex flex-col items-end leading-none">
+            <span className="font-dot text-4xl font-extrabold tracking-tight text-[#121214] tabular-nums">
+              {schedule.hours}
+            </span>
+            <span className="font-dot text-4xl font-extrabold tracking-tight text-[#121214] tabular-nums">
+              {schedule.minutes}
+            </span>
+          </div>
+          <span className="font-mono text-xs font-bold tracking-wider text-[#E8452C] pb-1">
+            {schedule.period}
           </span>
         </div>
         <DotGlyph size={44} color="#18181B" accentColor="#E8452C" />

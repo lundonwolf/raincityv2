@@ -151,4 +151,38 @@ test('validateBookingForm catches invalid input and accepts valid booking', () =
 
   const status = getSeattleScheduleStatus(new Date('2026-11-28T19:30:00Z'));
   assert.equal(status.isOpenNow, true);
+  assert.equal(status.timeString, '11:30 AM');
 });
+
+test('getSeattleScheduleStatus formats 12-hour time with AM and PM across midnight, noon, and evening', () => {
+  // PST is UTC-8 in late November
+  const midnight = getSeattleScheduleStatus(new Date('2026-11-28T08:05:00Z'));
+  assert.equal(midnight.hours, '12');
+  assert.equal(midnight.minutes, '05');
+  assert.equal(midnight.period, 'AM');
+  assert.equal(midnight.timeString, '12:05 AM');
+  assert.equal(midnight.isOpenNow, false);
+  assert.match(midnight.statusLabel, /10:00 AM–5:00 PM/);
+
+  const morning = getSeattleScheduleStatus(new Date('2026-11-28T17:45:00Z'));
+  assert.equal(morning.hours, '9');
+  assert.equal(morning.minutes, '45');
+  assert.equal(morning.period, 'AM');
+  assert.equal(morning.timeString, '9:45 AM');
+  assert.equal(morning.isOpenNow, false);
+
+  const noon = getSeattleScheduleStatus(new Date('2026-11-28T20:15:00Z'));
+  assert.equal(noon.hours, '12');
+  assert.equal(noon.minutes, '15');
+  assert.equal(noon.period, 'PM');
+  assert.equal(noon.timeString, '12:15 PM');
+  assert.equal(noon.isOpenNow, true);
+
+  const lateEvening = getSeattleScheduleStatus(new Date('2026-11-27T07:32:00Z'));
+  assert.equal(lateEvening.hours, '11');
+  assert.equal(lateEvening.minutes, '32');
+  assert.equal(lateEvening.period, 'PM');
+  assert.equal(lateEvening.timeString, '11:32 PM');
+  assert.equal(lateEvening.isOpenNow, false);
+});
+
