@@ -3,6 +3,7 @@ export type AppRoute =
   | '/pricing'
   | '/reviews'
   | '/book'
+  | '/account'
   | '/warranty'
   | '/terms'
   | '/privacy'
@@ -13,6 +14,7 @@ const VALID_ROUTES: readonly AppRoute[] = [
   '/pricing',
   '/reviews',
   '/book',
+  '/account',
   '/warranty',
   '/terms',
   '/privacy',

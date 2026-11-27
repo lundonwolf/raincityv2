@@ -1,5 +1,6 @@
-import { useState, type FormEvent, type MouseEvent } from 'react';
-import { Check, CheckCircle2, Loader2, RotateCcw } from 'lucide-react';
+import { useEffect, useState, type FormEvent, type MouseEvent } from 'react';
+import { onAuthStateChanged, type User } from 'firebase/auth';
+import { Check, CheckCircle2, Loader2, MessageSquare, RotateCcw, UserCircle2 } from 'lucide-react';
 import {
   OPERATING_DAYS,
   TIME_WINDOWS,
@@ -8,7 +9,8 @@ import {
   type SiteSettings,
   type TimeWindow,
 } from '../data/scooterData';
-import { createPublicBooking } from '../services/firestoreService';
+import { auth } from '../lib/firebase';
+import { createPublicBooking, subscribeUserAccount } from '../services/firestoreService';
 import type { AppRoute } from '../types/routes';
 import {
   formatCurrency,
@@ -69,9 +71,47 @@ export function BookingConsole({
   const [preferredDay, setPreferredDay] = useState<OperatingDay | ''>('Saturday');
   const [preferredWindow, setPreferredWindow] = useState<TimeWindow | ''>('10:00 AM – 12:00 PM');
   const [notes, setNotes] = useState('');
+  const [signedInUser, setSignedInUser] = useState<User | null>(null);
   const [errors, setErrors] = useState<Partial<Record<keyof BookingFormInput, string>>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
+
+  useEffect(() => {
+    let unsubAccount: (() => void) | null = null;
+    const unsubAuth = onAuthStateChanged(auth, (nextUser) => {
+      setSignedInUser(nextUser);
+      if (unsubAccount) {
+        unsubAccount();
+        unsubAccount = null;
+      }
+      if (!nextUser) return;
+
+      if (nextUser.displayName) {
+        setRiderName((prev) => prev || nextUser.displayName || '');
+      }
+      if (nextUser.email) {
+        setContactEmail((prev) => prev || nextUser.email || '');
+      }
+
+      if (nextUser.emailVerified) {
+        unsubAccount = subscribeUserAccount(nextUser.uid, (account) => {
+          if (!account) return;
+          if (account.displayName) setRiderName((prev) => prev || account.displayName);
+          if (account.email) setContactEmail((prev) => prev || account.email);
+          if (account.phone) setContactPhone((prev) => prev || account.phone);
+          if (account.defaultAddress) setAddress((prev) => prev || account.defaultAddress);
+          if (account.defaultScooterModel) {
+            setScooterModel((prev) => prev || account.defaultScooterModel);
+          }
+        });
+      }
+    });
+
+    return () => {
+      unsubAuth();
+      if (unsubAccount) unsubAccount();
+    };
+  }, []);
 
   const activeServices = services.filter((s) => s.active !== false);
   const phoneHref = `tel:+1${settings.phoneDisplay.replace(/\D/g, '')}`;
@@ -124,6 +164,7 @@ export function BookingConsole({
         estimatedLaborLabel: estimate.estimatedLaborLabel,
         estimatedMinutes: estimate.estimatedMinutes,
         notes: notes.trim(),
+        customerUid: signedInUser?.emailVerified ? signedInUser.uid : undefined,
       });
 
       const booking: ConfirmedBooking = {
@@ -169,11 +210,10 @@ export function BookingConsole({
             id="booking-heading"
             className="text-3xl sm:text-5xl font-semibold tracking-tight text-[#F4F4F0] [text-wrap:balance]"
           >
-            Schedule your mobile repair visit.
+            {settings.bookingHeadline}
           </h1>
           <p className="text-base text-[#A1A1AA] leading-relaxed">
-            No upfront payment required. We confirm component compatibility, repair scope, and
-            arrival timing before dispatching.
+            {settings.bookingIntro}
           </p>
         </div>
 
@@ -265,11 +305,19 @@ export function BookingConsole({
                   </p>
                 </div>
 
-                <div className="space-y-2 pt-4 border-t border-black/10 text-xs text-[#3F3F46]">
+                <div className="space-y-3 pt-4 border-t border-black/10 text-xs text-[#3F3F46]">
                   <p>
                     Confirmation logged for <strong>{confirmedBooking.contactEmail}</strong> and
                     SMS updates to <strong>{confirmedBooking.contactPhone}</strong>.
                   </p>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('/account')}
+                    className="w-full min-h-[42px] px-4 py-2.5 rounded-[10px] bg-[#E8452C] hover:bg-[#D53A22] text-white text-xs font-semibold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" aria-hidden="true" />
+                    Track Updates &amp; Message Mechanic in My Account
+                  </button>
                   <p>
                     Need to update your slot? Call or text{' '}
                     <a
@@ -291,6 +339,28 @@ export function BookingConsole({
               noValidate
               className="rounded-[22px] bg-[#F4F4F0] text-[#121214] p-6 sm:p-8 border border-black/10 space-y-6"
             >
+              <div className="rounded-[14px] bg-white border border-black/10 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2 text-[#27272A]">
+                  <UserCircle2 className="w-4 h-4 text-[#E8452C] shrink-0" aria-hidden="true" />
+                  {signedInUser?.email ? (
+                    <span>
+                      Signed in as <strong>{signedInUser.email}</strong> — this booking will
+                      automatically appear in My Account for live status updates &amp; messaging.
+                    </span>
+                  ) : (
+                    <span>
+                      Sign in to track live repair updates &amp; message your mechanic directly.
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onNavigate('/account')}
+                  className="font-semibold text-[#E8452C] hover:underline whitespace-nowrap cursor-pointer"
+                >
+                  {signedInUser ? 'Open My Account' : 'Sign In / My Account'}
+                </button>
+              </div>
               <fieldset className="space-y-3">
                 <legend className="text-sm font-semibold text-[#121214]">
                   1. Select Services Needed

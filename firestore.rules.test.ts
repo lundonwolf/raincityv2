@@ -23,9 +23,9 @@ test('Dirty Dozen security invariants are enforced in Firestore rules', () => {
   // 3. Bootstrapped admin email present
   assert.match(rules, /lundonwolf@gmail\.com/i);
 
-  // 4. PII isolation: bookings and customers disallow non-admin get/list
-  assert.match(rules, /match \/bookings\/\{bookingId\}[\s\S]*allow get: if isValidId\(bookingId\) && isAdmin\(\);/);
-  assert.match(rules, /match \/bookings\/\{bookingId\}[\s\S]*allow list: if isAdmin\(\);/);
+  // 4. PII isolation: bookings restrict reads to booking owner or admin; customers remain strictly admin-only
+  assert.match(rules, /match \/bookings\/\{bookingId\}[\s\S]*allow get: if isValidId\(bookingId\) && \(isBookingOwner\(existing\(\)\) \|\| isAdmin\(\)\);/);
+  assert.match(rules, /match \/bookings\/\{bookingId\}[\s\S]*allow list: if isBookingOwner\(resource\.data\) \|\| isAdmin\(\);/);
   assert.match(rules, /match \/customers\/\{customerId\}[\s\S]*allow get: if isValidId\(customerId\) && isAdmin\(\);/);
   assert.match(rules, /match \/customers\/\{customerId\}[\s\S]*allow list: if isAdmin\(\);/);
 
@@ -49,4 +49,22 @@ test('Dirty Dozen security invariants are enforced in Firestore rules', () => {
   // 9. Optional googlePlaceId validated cleanly on siteSettings
   assert.ok(rules.includes("'googlePlaceId'"));
   assert.ok(rules.includes("data.googlePlaceId.matches('^[a-zA-Z0-9_\\\\-]*$')"));
+
+  // 10. Admin historical booking imports require isAdmin() and createdAt <= request.time
+  assert.ok(rules.includes('incoming().createdAt is timestamp'));
+  assert.ok(rules.includes('incoming().createdAt <= request.time'));
+
+  // 11. Full-site editable CMS fields and booking confirmation tracking are validated safely
+  assert.ok(rules.includes("'heroHeadline'"));
+  assert.ok(rules.includes("'standupHourlyItems'"));
+  assert.ok(rules.includes("'supportedBrands'"));
+  assert.ok(rules.includes("'confirmationSentAt'"));
+  assert.ok(rules.includes("'confirmationMessageId'"));
+  assert.ok(rules.includes('function isOptionalStringList('));
+
+  // 12. Customer userAccounts and Master-Gate booking messages enforce strict ownership
+  assert.match(rules, /match \/userAccounts\/\{uid\}[\s\S]*allow get: if isValidId\(uid\) && \(\(isVerifiedUser\(\) && request\.auth\.uid == uid\) \|\| isAdmin\(\)\);/);
+  assert.match(rules, /match \/messages\/\{messageId\}[\s\S]*allow list: if isMessageOwner\(resource\.data\) \|\| isAdmin\(\);/);
+  assert.ok(rules.includes("incoming().senderRole == 'customer'"));
+  assert.ok(rules.includes("incoming().messageType == 'chat'"));
 });

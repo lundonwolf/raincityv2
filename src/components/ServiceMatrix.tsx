@@ -1,13 +1,10 @@
 import { useState } from 'react';
 import { ArrowRight, Check, Plus } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import {
-  ESTIMATE_RULES,
-  MOBILITY_HOURLY_ITEMS,
-  STANDUP_HOURLY_ITEMS,
-  type ScooterService,
-  type ServiceCategory,
-  type SiteSettings,
+import type {
+  ScooterService,
+  ServiceCategory,
+  SiteSettings,
 } from '../data/scooterData';
 import {
   filterServicesByCategory,
@@ -48,6 +45,10 @@ export function ServiceMatrix({
   const [activeCategory, setActiveCategory] = useState<ServiceCategory>('all');
   const shouldReduceMotion = useReducedMotion();
   const visibleServices = filterServicesByCategory(services, activeCategory);
+  const basicInspectionPrice =
+    services.find((s) => s.id === 'basic-inspection')?.price ?? 30;
+  const electricalDiagnosisPrice =
+    services.find((s) => s.id === 'electrical-diagnosis')?.price ?? 45;
 
   return (
     <section
@@ -60,18 +61,16 @@ export function ServiceMatrix({
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
           <div className="max-w-2xl space-y-3">
             <p className="font-mono text-xs tracking-wider text-[#A1A1AA]">
-              Straightforward Labor Menu · Zero Travel Charges
+              {settings.pricingEyebrow}
             </p>
             <h1
               id="services-heading"
               className="text-3xl sm:text-5xl font-semibold tracking-tight text-[#F4F4F0] [text-wrap:balance]"
             >
-              Know the labor. Agree the scope.
+              {settings.pricingHeadline}
             </h1>
             <p className="text-base text-[#A1A1AA] leading-relaxed">
-              Basic inspection is $30 and electrical diagnosis is $45 for up to 40 minutes. Other
-              labor is ${settings.hourlyRate}/hour. Parts and applicable tax are extra;{' '}
-              {settings.dispatchPolicyNote.toLowerCase()}
+              {settings.pricingIntro}
             </p>
           </div>
 
@@ -119,12 +118,16 @@ export function ServiceMatrix({
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="rounded-[18px] bg-[#F4F4F0] text-[#121214] p-4 sm:p-5 border border-black/10">
             <div className="font-mono text-[11px] text-[#52525B]">BASIC INSPECTION</div>
-            <div className="font-dot text-3xl font-extrabold tabular-nums mt-1">$30</div>
+            <div className="font-dot text-3xl font-extrabold tabular-nums mt-1">
+              ${basicInspectionPrice}
+            </div>
             <p className="text-xs text-[#3F3F46] mt-1">Safety check & repair scope</p>
           </div>
           <div className="rounded-[18px] bg-[#131316] text-[#F4F4F0] p-4 sm:p-5 border border-white/10">
             <div className="font-mono text-[11px] text-[#A1A1AA]">ELECTRICAL DIAGNOSIS</div>
-            <div className="font-dot text-3xl font-extrabold tabular-nums mt-1">$45</div>
+            <div className="font-dot text-3xl font-extrabold tabular-nums mt-1">
+              ${electricalDiagnosisPrice}
+            </div>
             <p className="text-xs text-[#A1A1AA] mt-1">Up to 40 min · credited to repair</p>
           </div>
           <div className="rounded-[18px] bg-[#131316] text-[#F4F4F0] p-4 sm:p-5 border border-white/10">
@@ -359,7 +362,7 @@ export function ServiceMatrix({
               </span>
             </div>
             <ul className="divide-y divide-white/8 text-sm">
-              {STANDUP_HOURLY_ITEMS.map((item) => (
+              {settings.standupHourlyItems.map((item) => (
                 <li key={item} className="py-2.5 flex items-center justify-between gap-4">
                   <span className="text-[#E4E4E7]">{item}</span>
                   <span className="font-mono text-xs text-[#A1A1AA] whitespace-nowrap shrink-0 tabular-nums">
@@ -384,7 +387,7 @@ export function ServiceMatrix({
                 </span>
               </div>
               <ul className="divide-y divide-black/10 text-sm">
-                {MOBILITY_HOURLY_ITEMS.map((item) => (
+                {settings.mobilityHourlyItems.map((item) => (
                   <li key={item} className="py-2.5 flex items-center justify-between gap-4">
                     <span className="text-[#18181B]">{item}</span>
                     <span className="font-mono text-xs text-[#52525B] whitespace-nowrap shrink-0 tabular-nums">
@@ -404,7 +407,7 @@ export function ServiceMatrix({
               <div className="font-mono text-[11px] text-[#E8452C]">BEFORE APPROVAL</div>
               <h2 className="text-lg font-semibold text-[#F4F4F0]">How estimates work</h2>
               <ul className="space-y-2 text-xs text-[#D4D4D8] leading-relaxed">
-                {ESTIMATE_RULES.map((rule) => (
+                {settings.estimateRules.map((rule) => (
                   <li key={rule} className="flex items-start gap-2">
                     <span
                       className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#E8452C] shrink-0"

@@ -74,16 +74,15 @@ export function HomePage({
           <div className="flex flex-col justify-between gap-7">
             <div className="space-y-5">
               <p className="font-mono text-xs tracking-wider text-[#A1A1AA]">
-                Mobile Electric Scooter Repair
+                {settings.heroEyebrow}
               </p>
 
               <h1 className="text-[clamp(2.25rem,4vw,3.6rem)] font-semibold tracking-tight leading-[1.06] text-[#F4F4F0] [text-wrap:balance]">
-                Mobile scooter repair, engineered like an instrument.
+                {settings.heroHeadline}
               </h1>
 
               <p className="text-base sm:text-lg text-[#B4B4BC] leading-relaxed max-w-[54ch]">
-                {settings.tagline} Basic inspection is $30, tune-ups start at $65, and general labor
-                is ${settings.hourlyRate}/hour—with zero travel or dispatch fees.
+                {settings.heroSubcopy}
               </p>
 
               <div className="flex flex-wrap items-center gap-3 pt-1">
@@ -132,10 +131,10 @@ export function HomePage({
           <div className="absolute bottom-0 inset-x-0 p-5 sm:p-7 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
             <div className="space-y-1">
               <div className="font-mono text-xs text-[#D4D4D8]">
-                ONE LOCAL MECHANIC · {settings.dispatchPolicyNote.toUpperCase()}
+                {settings.studioKicker.toUpperCase()} · {settings.dispatchPolicyNote.toUpperCase()}
               </div>
               <p className="text-lg sm:text-xl font-semibold text-white">
-                Built for Seattle rain, hills, and daily electric commuting.
+                {settings.studioHeadline}
               </p>
             </div>
             <div className="font-mono text-xs text-[#E4E4E7] whitespace-nowrap shrink-0">

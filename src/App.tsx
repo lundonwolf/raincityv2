@@ -7,6 +7,7 @@ import { RiderProof } from './components/RiderProof';
 import { BookingConsole, type ConfirmedBooking } from './components/BookingConsole';
 import { PolicyPages } from './components/PolicyPages';
 import { AdminConsole } from './components/AdminConsole';
+import { CustomerAccountPortal } from './components/CustomerAccountPortal';
 import { Footer } from './components/Footer';
 import {
   DEFAULT_SITE_SETTINGS,
@@ -202,8 +203,12 @@ export default function App() {
           />
         )}
 
+        {currentRoute === '/account' && (
+          <CustomerAccountPortal settings={settings} onNavigate={navigate} />
+        )}
+
         {currentRoute === '/admin' && (
-          <AdminConsole services={services} settings={settings} />
+          <AdminConsole services={services} settings={settings} onNavigate={navigate} />
         )}
       </main>
 

@@ -13,8 +13,8 @@ interface TopBarProps {
 const NAV_LINKS: { route: AppRoute; label: string; matchRoutes?: AppRoute[] }[] = [
   { route: '/pricing', label: 'Pricing' },
   { route: '/reviews', label: 'Reviews' },
+  { route: '/account', label: 'My Account' },
   { route: '/warranty', label: 'Policies', matchRoutes: ['/warranty', '/terms', '/privacy'] },
-  { route: '/admin', label: 'Admin' },
 ];
 
 export function TopBar({ currentRoute, selectedCount, settings, onNavigate }: TopBarProps) {
@@ -43,7 +43,7 @@ export function TopBar({ currentRoute, selectedCount, settings, onNavigate }: To
           {settings.businessName}
         </a>
 
-        {/* Zone 2: 5 single-line page links */}
+        {/* Zone 2: Single-line page links */}
         <nav
           aria-label="Primary navigation"
           className="hidden md:flex items-center gap-6 lg:gap-7 text-sm font-medium text-[#A1A1AA]"

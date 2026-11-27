@@ -48,6 +48,26 @@ service cloud.firestore {
       return val is string && val.size() <= maxLen;
     }
 
+    function isOptionalStringList(val, maxItems, maxItemLen) {
+      return val is list
+        && val.size() <= maxItems
+        && (val.size() == 0 || (val[0] is string && val[0].size() <= maxItemLen));
+    }
+
+    function isBookingOwner(data) {
+      return isVerifiedUser() && (
+        ('customerUid' in data && data.customerUid == request.auth.uid)
+        || data.contactEmail == request.auth.token.email
+      );
+    }
+
+    function isMessageOwner(data) {
+      return isVerifiedUser() && (
+        (data.bookingOwnerUid != '' && data.bookingOwnerUid == request.auth.uid)
+        || data.bookingOwnerEmail == request.auth.token.email
+      );
+    }
+
     // 3. Entity Validation Blueprints
     function isValidSiteSettings(data) {
       return data.keys().hasAll([
@@ -57,7 +77,15 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'businessName', 'tagline', 'phoneDisplay', 'email', 'hoursShort',
           'hourlyRate', 'dispatchPolicyNote', 'warrantyDays', 'announcement',
-          'googlePlaceId', 'updatedAt'
+          'googlePlaceId',
+          'heroEyebrow', 'heroHeadline', 'heroSubcopy', 'studioKicker', 'studioHeadline',
+          'pricingEyebrow', 'pricingHeadline', 'pricingIntro',
+          'standupHourlyItems', 'mobilityHourlyItems', 'estimateRules',
+          'reviewsHeadline', 'reviewsIntro', 'supportedBrands',
+          'bookingHeadline', 'bookingIntro',
+          'policyEffectiveDate', 'warrantyHighlightNote', 'termsScopeNote', 'privacyIntroNote',
+          'footerNote',
+          'updatedAt'
         ])
         && isNonEmptyString(data.businessName, 2, 80)
         && isNonEmptyString(data.tagline, 4, 180)
@@ -73,6 +101,27 @@ service cloud.firestore {
           && data.googlePlaceId.size() <= 128
           && data.googlePlaceId.matches('^[a-zA-Z0-9_\\-]*$')
         ))
+        && (!('heroEyebrow' in data) || isOptionalString(data.heroEyebrow, 80))
+        && (!('heroHeadline' in data) || isOptionalString(data.heroHeadline, 160))
+        && (!('heroSubcopy' in data) || isOptionalString(data.heroSubcopy, 360))
+        && (!('studioKicker' in data) || isOptionalString(data.studioKicker, 80))
+        && (!('studioHeadline' in data) || isOptionalString(data.studioHeadline, 160))
+        && (!('pricingEyebrow' in data) || isOptionalString(data.pricingEyebrow, 100))
+        && (!('pricingHeadline' in data) || isOptionalString(data.pricingHeadline, 140))
+        && (!('pricingIntro' in data) || isOptionalString(data.pricingIntro, 360))
+        && (!('standupHourlyItems' in data) || isOptionalStringList(data.standupHourlyItems, 16, 160))
+        && (!('mobilityHourlyItems' in data) || isOptionalStringList(data.mobilityHourlyItems, 16, 160))
+        && (!('estimateRules' in data) || isOptionalStringList(data.estimateRules, 16, 240))
+        && (!('reviewsHeadline' in data) || isOptionalString(data.reviewsHeadline, 140))
+        && (!('reviewsIntro' in data) || isOptionalString(data.reviewsIntro, 360))
+        && (!('supportedBrands' in data) || isOptionalStringList(data.supportedBrands, 30, 60))
+        && (!('bookingHeadline' in data) || isOptionalString(data.bookingHeadline, 140))
+        && (!('bookingIntro' in data) || isOptionalString(data.bookingIntro, 360))
+        && (!('policyEffectiveDate' in data) || isOptionalString(data.policyEffectiveDate, 60))
+        && (!('warrantyHighlightNote' in data) || isOptionalString(data.warrantyHighlightNote, 600))
+        && (!('termsScopeNote' in data) || isOptionalString(data.termsScopeNote, 600))
+        && (!('privacyIntroNote' in data) || isOptionalString(data.privacyIntroNote, 600))
+        && (!('footerNote' in data) || isOptionalString(data.footerNote, 240))
         && data.updatedAt == request.time;
     }
 
@@ -119,7 +168,8 @@ service cloud.firestore {
           'scooterModel', 'address', 'zoneId', 'zoneName', 'preferredDay',
           'preferredWindow', 'serviceIds', 'serviceTitles',
           'estimatedLaborLabel', 'estimatedMinutes', 'notes', 'adminNotes',
-          'status', 'createdAt', 'updatedAt'
+          'status', 'customerUid', 'confirmationSentAt', 'confirmationMessageId',
+          'createdAt', 'updatedAt'
         ])
         && isNonEmptyString(data.referenceId, 6, 32)
         && data.referenceId.matches('^[A-Z0-9\\-]+$')
@@ -141,7 +191,53 @@ service cloud.firestore {
         && isOptionalString(data.notes, 1000)
         && isOptionalString(data.adminNotes, 1000)
         && data.status in ['new', 'confirmed', 'in_progress', 'completed', 'cancelled']
+        && (!('customerUid' in data) || isValidId(data.customerUid))
+        && (!('confirmationSentAt' in data) || isOptionalString(data.confirmationSentAt, 40))
+        && (!('confirmationMessageId' in data) || isOptionalString(data.confirmationMessageId, 120))
         && data.updatedAt == request.time;
+    }
+
+    function isValidUserAccount(data) {
+      return data.keys().hasAll([
+          'uid', 'displayName', 'email', 'phone',
+          'defaultAddress', 'defaultScooterModel', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid', 'displayName', 'email', 'phone',
+          'defaultAddress', 'defaultScooterModel', 'updatedAt'
+        ])
+        && isValidId(data.uid)
+        && data.uid == request.auth.uid
+        && isNonEmptyString(data.displayName, 1, 100)
+        && isNonEmptyString(data.email, 5, 120)
+        && data.email == request.auth.token.email
+        && isOptionalString(data.phone, 32)
+        && isOptionalString(data.defaultAddress, 200)
+        && isOptionalString(data.defaultScooterModel, 120)
+        && data.updatedAt == request.time;
+    }
+
+    function isValidBookingMessage(data, bookingId) {
+      return data.keys().hasAll([
+          'bookingId', 'bookingOwnerEmail', 'bookingOwnerUid',
+          'senderUid', 'senderRole', 'senderName',
+          'messageType', 'body', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'bookingId', 'bookingOwnerEmail', 'bookingOwnerUid',
+          'senderUid', 'senderRole', 'senderName',
+          'messageType', 'body', 'createdAt'
+        ])
+        && data.bookingId == bookingId
+        && isNonEmptyString(data.bookingOwnerEmail, 5, 120)
+        && isOptionalString(data.bookingOwnerUid, 128)
+        && isValidId(data.senderUid)
+        && data.senderUid == request.auth.uid
+        && data.senderRole in ['customer', 'admin']
+        && isNonEmptyString(data.senderName, 1, 100)
+        && data.messageType in ['chat', 'status_update', 'confirmation_email']
+        && isNonEmptyString(data.body, 1, 1500)
+        && data.createdAt == request.time;
     }
 
     function isValidCustomerProfile(data) {
@@ -180,7 +276,15 @@ service cloud.firestore {
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'businessName', 'tagline', 'phoneDisplay', 'email', 'hoursShort',
           'hourlyRate', 'dispatchPolicyNote', 'warrantyDays', 'announcement',
-          'googlePlaceId', 'updatedAt'
+          'googlePlaceId',
+          'heroEyebrow', 'heroHeadline', 'heroSubcopy', 'studioKicker', 'studioHeadline',
+          'pricingEyebrow', 'pricingHeadline', 'pricingIntro',
+          'standupHourlyItems', 'mobilityHourlyItems', 'estimateRules',
+          'reviewsHeadline', 'reviewsIntro', 'supportedBrands',
+          'bookingHeadline', 'bookingIntro',
+          'policyEffectiveDate', 'warrantyHighlightNote', 'termsScopeNote', 'privacyIntroNote',
+          'footerNote',
+          'updatedAt'
         ]);
       allow delete: if false;
     }
@@ -204,19 +308,45 @@ service cloud.firestore {
       allow delete: if isVerifiedUser() && isValidId(serviceId) && isAdmin();
     }
 
-    match /bookings/{bookingId} {
-      // Strictly Admin-only read/list for PII protection
-      allow get: if isValidId(bookingId) && isAdmin();
+    match /userAccounts/{uid} {
+      allow get: if isValidId(uid) && ((isVerifiedUser() && request.auth.uid == uid) || isAdmin());
       allow list: if isAdmin();
+      allow create: if isVerifiedUser() && isValidId(uid) && uid == request.auth.uid && isValidUserAccount(incoming());
+      allow update: if isVerifiedUser() && isValidId(uid) && uid == request.auth.uid
+        && isValidUserAccount(incoming())
+        && incoming().uid == existing().uid
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName', 'email', 'phone', 'defaultAddress', 'defaultScooterModel', 'updatedAt'
+        ]);
+      allow delete: if isVerifiedUser() && isValidId(uid) && isAdmin();
+    }
 
-      // Public customers may create a new booking with strict schema & state lock (no zone fields)
+    match /bookings/{bookingId} {
+      // Owner-isolated or Admin read/list for PII protection
+      allow get: if isValidId(bookingId) && (isBookingOwner(existing()) || isAdmin());
+      allow list: if isBookingOwner(resource.data) || isAdmin();
+
+      // Public/Customer creates new bookings locked to status='new' & request.time;
+      // Verified admins may also import historical bookings with original status, notes, and createdAt <= request.time
       allow create: if isValidId(bookingId)
         && isValidBookingBase(incoming())
         && !('zoneId' in incoming())
         && !('zoneName' in incoming())
-        && incoming().status == 'new'
-        && incoming().adminNotes == ''
-        && incoming().createdAt == request.time;
+        && (
+          (
+            incoming().status == 'new'
+            && incoming().adminNotes == ''
+            && !('confirmationSentAt' in incoming())
+            && !('confirmationMessageId' in incoming())
+            && (!('customerUid' in incoming()) || (isVerifiedUser() && incoming().customerUid == request.auth.uid))
+            && incoming().createdAt == request.time
+          ) || (
+            isVerifiedUser()
+            && incoming().createdAt is timestamp
+            && incoming().createdAt <= request.time
+            && isAdmin()
+          )
+        );
 
       // Strictly Admin-only update with immutable referenceId/createdAt & explicit allowlist
       allow update: if isVerifiedUser() && isValidId(bookingId)
@@ -227,11 +357,34 @@ service cloud.firestore {
           'riderName', 'contactEmail', 'contactPhone', 'scooterModel', 'address',
           'preferredDay', 'preferredWindow',
           'serviceIds', 'serviceTitles', 'estimatedLaborLabel', 'estimatedMinutes',
-          'notes', 'adminNotes', 'status', 'updatedAt'
+          'notes', 'adminNotes', 'status', 'customerUid',
+          'confirmationSentAt', 'confirmationMessageId', 'updatedAt'
         ])
         && isAdmin();
 
       allow delete: if isVerifiedUser() && isValidId(bookingId) && isAdmin();
+
+      // Nested two-way booking messages & live updates timeline
+      match /messages/{messageId} {
+        allow get: if isValidId(bookingId) && isValidId(messageId) && (isMessageOwner(existing()) || isAdmin());
+        allow list: if isMessageOwner(resource.data) || isAdmin();
+        allow create: if isVerifiedUser()
+          && isValidId(bookingId)
+          && isValidId(messageId)
+          && isValidBookingMessage(incoming(), bookingId)
+          && exists(/databases/$(database)/documents/bookings/$(bookingId))
+          && incoming().bookingOwnerEmail == get(/databases/$(database)/documents/bookings/$(bookingId)).data.contactEmail
+          && (
+            (incoming().senderRole == 'admin' && isAdmin()) ||
+            (
+              incoming().senderRole == 'customer'
+              && incoming().messageType == 'chat'
+              && isBookingOwner(get(/databases/$(database)/documents/bookings/$(bookingId)).data)
+            )
+          );
+        allow update: if false;
+        allow delete: if isVerifiedUser() && isValidId(bookingId) && isValidId(messageId) && isAdmin();
+      }
     }
 
     match /customers/{customerId} {

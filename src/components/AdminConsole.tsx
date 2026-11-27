@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
 import {
   Check,
-  ExternalLink,
   Loader2,
   LogOut,
+  MessageSquare,
   Plus,
   RefreshCw,
   Save,
   Search,
+  Send,
   ShieldCheck,
   Trash2,
   UserPlus,
@@ -33,27 +34,41 @@ import {
   deleteAdminBooking,
   deleteAdminCustomer,
   deleteServiceItem,
+  markBookingConfirmationSent,
   saveAdminCustomer,
   saveServiceItem,
   saveSiteSettings,
   seedDefaultServicesToFirestore,
+  sendBookingMessage,
   subscribeAdminBookings,
   subscribeAdminCustomers,
   updateAdminBooking,
+  updateAdminBookingStatus,
 } from '../services/firestoreService';
+import {
+  triggerBookingConfirmationEmailApi,
+  type ConfirmationEmailApiResponse,
+} from '../services/mailService';
+import type { AppRoute } from '../types/routes';
+import { formatConfirmationTimestamp } from '../utils/bookingConfirmation';
 import {
   deriveCustomersFromBookings,
   formatServicePrice,
   type AggregatedCustomer,
 } from '../utils/repairCalculator';
 import { AdminAnalyticsPanel } from './AdminAnalyticsPanel';
+import { AdminImportPanel } from './AdminImportPanel';
+import { AdminSiteEditor } from './AdminSiteEditor';
+import { BookingConfirmationModal } from './BookingConfirmationModal';
+import { BookingMessagesPanel } from './BookingMessagesPanel';
 
 interface AdminConsoleProps {
   services: ScooterService[];
   settings: SiteSettings;
+  onNavigate: (route: AppRoute) => void;
 }
 
-type AdminTab = 'bookings' | 'analytics' | 'customers' | 'site';
+type AdminTab = 'bookings' | 'analytics' | 'customers' | 'site' | 'import';
 
 const BOOKING_STATUSES: BookingStatus[] = [
   'new',
@@ -71,7 +86,7 @@ const STATUS_LABELS: Record<BookingStatus, string> = {
   cancelled: 'Cancelled',
 };
 
-export function AdminConsole({ services, settings }: AdminConsoleProps) {
+export function AdminConsole({ services, settings, onNavigate }: AdminConsoleProps) {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -84,10 +99,14 @@ export function AdminConsole({ services, settings }: AdminConsoleProps) {
   const [dataError, setDataError] = useState('');
   const [feedback, setFeedback] = useState('');
 
-  // Bookings filter & editor state
+  // Bookings filter, status, confirmation, messaging & editor state
   const [statusFilter, setStatusFilter] = useState<BookingStatus | 'all'>('all');
   const [bookingSearch, setBookingSearch] = useState('');
   const [editingBooking, setEditingBooking] = useState<BookingRecord | null>(null);
+  const [confirmingBookingId, setConfirmingBookingId] = useState<string | null>(null);
+  const [messagingBookingId, setMessagingBookingId] = useState<string | null>(null);
+  const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
+  const [savingConfirmation, setSavingConfirmation] = useState(false);
   const [confirmDeleteBookingId, setConfirmDeleteBookingId] = useState<string | null>(null);
   const [savingBooking, setSavingBooking] = useState(false);
 
@@ -99,15 +118,10 @@ export function AdminConsole({ services, settings }: AdminConsoleProps) {
   const [savingCustomer, setSavingCustomer] = useState(false);
 
   // Site settings & service pricing editor state
-  const [settingsDraft, setSettingsDraft] = useState<SiteSettings>(settings);
   const [savingSettings, setSavingSettings] = useState(false);
   const [editingService, setEditingService] = useState<ScooterService | null>(null);
   const [includesDraftText, setIncludesDraftText] = useState('');
   const [savingService, setSavingService] = useState(false);
-
-  useEffect(() => {
-    setSettingsDraft(settings);
-  }, [settings]);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (nextUser) => {
@@ -245,6 +259,164 @@ export function AdminConsole({ services, settings }: AdminConsoleProps) {
     }
   };
 
+  const handleQuickStatusChange = async (booking: BookingRecord, nextStatus: BookingStatus) => {
+    if (booking.status === nextStatus) return;
+    setUpdatingStatusId(booking.id);
+    setDataError('');
+    try {
+      await updateAdminBookingStatus(booking.id, nextStatus);
+      if (user) {
+        try {
+          await sendBookingMessage({
+            booking,
+            senderUid: user.uid,
+            senderRole: 'admin',
+            senderName: settings.businessName,
+            messageType: 'status_update',
+            body: `Booking status updated to ${STATUS_LABELS[nextStatus]} (${booking.preferredDay} · ${booking.preferredWindow}).`,
+          });
+        } catch {
+          // Non-blocking: booking status already updated
+        }
+      }
+      showToast(`Updated ${booking.referenceId} status to ${STATUS_LABELS[nextStatus]}.`);
+    } catch (err) {
+      setDataError(err instanceof Error ? err.message : 'Failed to update booking status.');
+    } finally {
+      setUpdatingStatusId(null);
+    }
+  };
+
+  /**
+   * Triggers a confirmation email to the rider via the backend mock mail API,
+   * records delivery metadata + Confirmed status on the booking, and posts
+   * a confirmation update directly into the customer's My Account timeline.
+   */
+  const triggerConfirmationEmail = async (
+    booking: BookingRecord,
+    options: { setConfirmed: boolean; customNote: string },
+  ): Promise<ConfirmationEmailApiResponse> => {
+    if (!auth.currentUser) {
+      throw new Error('Admin session expired. Please sign in again.');
+    }
+    setSavingConfirmation(true);
+    setDataError('');
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      const response = await triggerBookingConfirmationEmailApi({
+        booking,
+        settings,
+        customNote: options.customNote,
+        idToken,
+      });
+
+      const noteStamp = `[${formatConfirmationTimestamp(response.acceptedAt)}] Confirmation email sent via ${response.provider} (${response.messageId})${
+        options.customNote.trim() ? `: ${options.customNote.trim()}` : ''
+      }`;
+      const nextAdminNotes = booking.adminNotes.trim()
+        ? `${booking.adminNotes.trim()}\n${noteStamp}`
+        : noteStamp;
+
+      await markBookingConfirmationSent(booking.id, {
+        status: options.setConfirmed ? 'confirmed' : undefined,
+        adminNotes: nextAdminNotes,
+        sentAtIso: response.acceptedAt,
+        confirmationMessageId: response.messageId,
+      });
+
+      try {
+        await sendBookingMessage({
+          booking,
+          senderUid: auth.currentUser.uid,
+          senderRole: 'admin',
+          senderName: settings.businessName,
+          messageType: 'confirmation_email',
+          body: [
+            `Confirmation email sent to ${response.to} (Ref: ${response.messageId}).`,
+            `Scheduled: ${booking.preferredDay} · ${booking.preferredWindow} at ${booking.address}.`,
+            options.customNote.trim() ? `Mechanic note: ${options.customNote.trim()}` : '',
+          ]
+            .filter(Boolean)
+            .join('\n'),
+        });
+      } catch {
+        // Non-blocking: email API and booking record already succeeded
+      }
+
+      showToast(`Confirmation email sent to ${response.to} (${response.messageId}).`);
+      return response;
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to send booking confirmation email.';
+      setDataError(message);
+      throw err;
+    } finally {
+      setSavingConfirmation(false);
+    }
+  };
+
+  const handleRecordConfirmation = async (
+    booking: BookingRecord,
+    options: {
+      setConfirmed: boolean;
+      channel: 'email' | 'sms' | 'copy' | 'manual';
+      customNote: string;
+    },
+  ) => {
+    setSavingConfirmation(true);
+    setDataError('');
+    try {
+      const nowIso = new Date().toISOString();
+      const channelLabel =
+        options.channel === 'email'
+          ? 'Email confirmation opened'
+          : options.channel === 'sms'
+            ? 'SMS confirmation opened'
+            : options.channel === 'copy'
+              ? 'Confirmation message copied'
+              : 'Marked confirmed';
+      const noteStamp = `[${formatConfirmationTimestamp(nowIso)}] ${channelLabel}${
+        options.customNote.trim() ? `: ${options.customNote.trim()}` : ''
+      }`;
+      const nextAdminNotes = booking.adminNotes.trim()
+        ? `${booking.adminNotes.trim()}\n${noteStamp}`
+        : noteStamp;
+
+      await markBookingConfirmationSent(booking.id, {
+        status: options.setConfirmed ? 'confirmed' : undefined,
+        adminNotes: nextAdminNotes,
+        sentAtIso: nowIso,
+      });
+
+      if (user) {
+        try {
+          await sendBookingMessage({
+            booking,
+            senderUid: user.uid,
+            senderRole: 'admin',
+            senderName: settings.businessName,
+            messageType: options.channel === 'manual' ? 'status_update' : 'confirmation_email',
+            body: `${channelLabel} for ${booking.preferredDay} (${booking.preferredWindow}).${
+              options.customNote.trim() ? ` Note: ${options.customNote.trim()}` : ''
+            }`,
+          });
+        } catch {
+          // Non-blocking
+        }
+      }
+
+      showToast(
+        options.setConfirmed
+          ? `${booking.referenceId} marked Confirmed & confirmation logged.`
+          : `Confirmation logged for ${booking.referenceId}.`,
+      );
+    } catch (err) {
+      setDataError(err instanceof Error ? err.message : 'Failed to log booking confirmation.');
+    } finally {
+      setSavingConfirmation(false);
+    }
+  };
+
   const handleDeleteBooking = async (bookingId: string) => {
     try {
       await deleteAdminBooking(bookingId);
@@ -311,13 +483,12 @@ export function AdminConsole({ services, settings }: AdminConsoleProps) {
     }
   };
 
-  const handleSaveSiteSettings = async (e: FormEvent) => {
-    e.preventDefault();
+  const handleSaveSiteSettings = async (nextSettings: SiteSettings) => {
     setSavingSettings(true);
     setDataError('');
     try {
-      await saveSiteSettings(settingsDraft);
-      showToast('Site settings saved live to Firestore.');
+      await saveSiteSettings(nextSettings);
+      showToast('All website changes published live to Firestore.');
     } catch (err) {
       setDataError(err instanceof Error ? err.message : 'Failed to save site settings.');
     } finally {
@@ -384,7 +555,7 @@ export function AdminConsole({ services, settings }: AdminConsoleProps) {
     setDataError('');
     try {
       await seedDefaultServicesToFirestore();
-      await saveSiteSettings(settingsDraft);
+      await saveSiteSettings(settings);
       showToast('Synced official raincityscooter.com pricing catalog to Firestore.');
     } catch (err) {
       setDataError(err instanceof Error ? err.message : 'Failed to seed defaults.');
@@ -500,7 +671,8 @@ export function AdminConsole({ services, settings }: AdminConsoleProps) {
                   { id: 'bookings', label: `Bookings (${bookings.length})` },
                   { id: 'analytics', label: 'Analytics' },
                   { id: 'customers', label: `Customers (${aggregatedCustomers.length})` },
-                  { id: 'site', label: 'Site Data & Pricing' },
+                  { id: 'site', label: 'Site Editor & Pricing' },
+                  { id: 'import', label: 'Import Data' },
                 ] as { id: AdminTab; label: string }[]
               ).map((tab) => (
                 <button
@@ -802,78 +974,189 @@ export function AdminConsole({ services, settings }: AdminConsoleProps) {
               </div>
             ) : (
               <div className="space-y-3">
-                {filteredBookings.map((b) => (
-                  <article
-                    key={b.id}
-                    className="rounded-[18px] bg-[#131316] border border-white/10 p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-5"
-                  >
-                    <div className="space-y-2 min-w-0">
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs">
-                        <span className="text-[#F4F4F0] font-semibold">{b.referenceId}</span>
-                        <span className="text-[#E8452C] font-semibold">
-                          {STATUS_LABELS[b.status].toUpperCase()}
-                        </span>
-                        <span className="text-[#A1A1AA]">
-                          {b.preferredDay} · {b.preferredWindow}
-                        </span>
-                        <span className="text-[#F4F4F0] tabular-nums">{b.estimatedLaborLabel}</span>
-                      </div>
+                {filteredBookings.map((b) => {
+                  const isUpdatingThis = updatingStatusId === b.id;
+                  const isConfirmOpen = confirmingBookingId === b.id;
+                  const isMessagesOpen = messagingBookingId === b.id;
+                  const sentLabel = formatConfirmationTimestamp(b.confirmationSentAt);
+                  return (
+                    <div key={b.id} className="space-y-3">
+                      <article className="rounded-[18px] bg-[#131316] border border-white/10 p-5 flex flex-col xl:flex-row xl:items-center justify-between gap-5">
+                        <div className="space-y-2 min-w-0">
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs">
+                            <span className="text-[#F4F4F0] font-semibold">{b.referenceId}</span>
+                            <span
+                              className={`font-semibold ${
+                                b.status === 'confirmed'
+                                  ? 'text-emerald-400'
+                                  : b.status === 'completed'
+                                    ? 'text-[#A1A1AA]'
+                                    : b.status === 'cancelled'
+                                      ? 'text-[#71717A]'
+                                      : 'text-[#E8452C]'
+                              }`}
+                            >
+                              {STATUS_LABELS[b.status].toUpperCase()}
+                            </span>
+                            {sentLabel && (
+                              <span className="text-emerald-400">
+                                · CONFIRMATION SENT {sentLabel.toUpperCase()}
+                              </span>
+                            )}
+                            <span className="text-[#A1A1AA]">
+                              {b.preferredDay} · {b.preferredWindow}
+                            </span>
+                            <span className="text-[#F4F4F0] tabular-nums">
+                              {b.estimatedLaborLabel}
+                            </span>
+                          </div>
 
-                      <div className="text-base font-semibold text-[#F4F4F0]">
-                        {b.riderName} · {b.scooterModel}
-                      </div>
+                          <div className="text-base font-semibold text-[#F4F4F0]">
+                            {b.riderName} · {b.scooterModel}
+                          </div>
 
-                      <div className="text-xs text-[#A1A1AA] space-y-0.5">
-                        <p>
-                          {b.contactPhone} · {b.contactEmail} · {b.address}
-                        </p>
-                        <p className="text-[#D4D4D8]">Services: {b.serviceTitles.join(', ')}</p>
-                        {b.notes && <p className="text-[#A1A1AA]">Rider note: {b.notes}</p>}
-                        {b.adminNotes && (
-                          <p className="text-[#4A82E8]">Mechanic note: {b.adminNotes}</p>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setEditingBooking(b)}
-                        className="min-h-[38px] px-3.5 py-1.5 rounded-[10px] bg-[#F4F4F0] text-[#121214] text-xs font-semibold hover:bg-white cursor-pointer"
-                      >
-                        Edit Booking
-                      </button>
-
-                      {confirmDeleteBookingId === b.id ? (
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteBooking(b.id)}
-                            className="min-h-[38px] px-3 py-1.5 rounded-[10px] bg-[#E8452C] text-white text-xs font-semibold cursor-pointer"
-                          >
-                            Confirm Delete
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setConfirmDeleteBookingId(null)}
-                            className="min-h-[38px] px-2.5 py-1.5 rounded-[10px] border border-white/15 text-xs text-[#A1A1AA] cursor-pointer"
-                          >
-                            Cancel
-                          </button>
+                          <div className="text-xs text-[#A1A1AA] space-y-0.5">
+                            <p>
+                              {b.contactPhone} · {b.contactEmail} · {b.address}
+                            </p>
+                            <p className="text-[#D4D4D8]">Services: {b.serviceTitles.join(', ')}</p>
+                            {b.notes && <p className="text-[#A1A1AA]">Rider note: {b.notes}</p>}
+                            {b.adminNotes && (
+                              <p className="text-[#4A82E8] whitespace-pre-line">
+                                Mechanic note: {b.adminNotes}
+                              </p>
+                            )}
+                          </div>
                         </div>
-                      ) : (
-                        <button
-                          type="button"
-                          aria-label={`Delete booking ${b.referenceId}`}
-                          onClick={() => setConfirmDeleteBookingId(b.id)}
-                          className="min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-[10px] border border-white/15 text-[#A1A1AA] hover:text-[#E8452C] hover:border-[#E8452C] cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4" aria-hidden="true" />
-                        </button>
+
+                        <div className="flex flex-wrap items-center gap-2 shrink-0">
+                          {/* Inline 1-Click Status Selector */}
+                          <label className="sr-only" htmlFor={`status-${b.id}`}>
+                            Status for {b.referenceId}
+                          </label>
+                          <select
+                            id={`status-${b.id}`}
+                            disabled={isUpdatingThis}
+                            value={b.status}
+                            onChange={(e) =>
+                              handleQuickStatusChange(b, e.target.value as BookingStatus)
+                            }
+                            className="min-h-[38px] px-3 py-1.5 rounded-[10px] bg-[#1C1C22] border border-white/15 text-[#F4F4F0] text-xs font-semibold cursor-pointer disabled:opacity-50"
+                          >
+                            {BOOKING_STATUSES.map((st) => (
+                              <option key={st} value={st}>
+                                Status: {STATUS_LABELS[st]}
+                              </option>
+                            ))}
+                          </select>
+
+                          {/* Send Confirmation Button */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMessagingBookingId(null);
+                              setConfirmingBookingId(isConfirmOpen ? null : b.id);
+                            }}
+                            className={`min-h-[38px] px-3.5 py-1.5 rounded-[10px] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors ${
+                              isConfirmOpen
+                                ? 'bg-white text-[#121214]'
+                                : b.status === 'new' || !b.confirmationSentAt
+                                  ? 'bg-[#E8452C] hover:bg-[#D53A22] text-white'
+                                  : 'border border-white/15 text-[#F4F4F0] hover:bg-white/10'
+                            }`}
+                          >
+                            <Send className="w-3.5 h-3.5" aria-hidden="true" />
+                            {isConfirmOpen
+                              ? 'Close Composer'
+                              : b.confirmationSentAt
+                                ? 'Resend Confirmation'
+                                : 'Send Confirmation'}
+                          </button>
+
+                          {/* Customer Messages Button */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setConfirmingBookingId(null);
+                              setMessagingBookingId(isMessagesOpen ? null : b.id);
+                            }}
+                            className={`min-h-[38px] px-3.5 py-1.5 rounded-[10px] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors ${
+                              isMessagesOpen
+                                ? 'bg-white text-[#121214]'
+                                : 'border border-white/15 text-[#F4F4F0] hover:bg-white/10'
+                            }`}
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" aria-hidden="true" />
+                            {isMessagesOpen ? 'Hide Messages' : 'Messages'}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setConfirmingBookingId(null);
+                              setMessagingBookingId(null);
+                              setEditingBooking(b);
+                            }}
+                            className="min-h-[38px] px-3.5 py-1.5 rounded-[10px] bg-[#F4F4F0] text-[#121214] text-xs font-semibold hover:bg-white cursor-pointer"
+                          >
+                            Edit Details
+                          </button>
+
+                          {confirmDeleteBookingId === b.id ? (
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteBooking(b.id)}
+                                className="min-h-[38px] px-3 py-1.5 rounded-[10px] bg-[#E8452C] text-white text-xs font-semibold cursor-pointer"
+                              >
+                                Confirm Delete
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteBookingId(null)}
+                                className="min-h-[38px] px-2.5 py-1.5 rounded-[10px] border border-white/15 text-xs text-[#A1A1AA] cursor-pointer"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              aria-label={`Delete booking ${b.referenceId}`}
+                              onClick={() => setConfirmDeleteBookingId(b.id)}
+                              className="min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-[10px] border border-white/15 text-[#A1A1AA] hover:text-[#E8452C] hover:border-[#E8452C] cursor-pointer"
+                            >
+                              <Trash2 className="w-4 h-4" aria-hidden="true" />
+                            </button>
+                          )}
+                        </div>
+                      </article>
+
+                      {isConfirmOpen && (
+                        <BookingConfirmationModal
+                          booking={b}
+                          settings={settings}
+                          saving={savingConfirmation}
+                          onClose={() => setConfirmingBookingId(null)}
+                          onTriggerConfirmationEmail={triggerConfirmationEmail}
+                          onRecordConfirmation={handleRecordConfirmation}
+                        />
+                      )}
+
+                      {isMessagesOpen && (
+                        <BookingMessagesPanel
+                          booking={b}
+                          viewerRole="admin"
+                          viewerUid={user.uid}
+                          viewerEmail={user.email ?? ''}
+                          viewerName={settings.businessName}
+                          businessName={settings.businessName}
+                          surface="light"
+                        />
                       )}
                     </div>
-                  </article>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1121,194 +1404,15 @@ export function AdminConsole({ services, settings }: AdminConsoleProps) {
           </div>
         )}
 
-        {/* TAB 3: SITE DATA & PRICING EDITOR */}
+        {/* TAB 4: FULL-SITE VISUAL EDITOR & PRICING CATALOG */}
         {activeTab === 'site' && (
           <div className="space-y-8">
-            {/* Global Site Settings Form */}
-            <form
-              onSubmit={handleSaveSiteSettings}
-              className="rounded-[22px] bg-[#F4F4F0] text-[#121214] p-6 sm:p-8 border border-black/10 space-y-5"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-black/10 pb-4">
-                <div>
-                  <div className="font-mono text-xs text-[#52525B]">LIVE SITE CONFIGURATION</div>
-                  <h2 className="text-xl font-semibold">Business Details & Global Rates</h2>
-                </div>
-                <button
-                  type="submit"
-                  disabled={savingSettings}
-                  className="min-h-[42px] px-5 py-2 rounded-[10px] bg-[#E8452C] hover:bg-[#D53A22] text-white text-xs font-semibold inline-flex items-center gap-2 cursor-pointer"
-                >
-                  <Save className="w-3.5 h-3.5" aria-hidden="true" />
-                  {savingSettings ? 'Saving...' : 'Publish Site Settings'}
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div className="space-y-1">
-                  <label htmlFor="set-name" className="text-xs font-semibold">
-                    Business Name
-                  </label>
-                  <input
-                    id="set-name"
-                    type="text"
-                    value={settingsDraft.businessName}
-                    onChange={(e) =>
-                      setSettingsDraft({ ...settingsDraft, businessName: e.target.value })
-                    }
-                    className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label htmlFor="set-phone" className="text-xs font-semibold">
-                    Phone Display
-                  </label>
-                  <input
-                    id="set-phone"
-                    type="text"
-                    value={settingsDraft.phoneDisplay}
-                    onChange={(e) =>
-                      setSettingsDraft({ ...settingsDraft, phoneDisplay: e.target.value })
-                    }
-                    className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label htmlFor="set-email" className="text-xs font-semibold">
-                    Contact Email
-                  </label>
-                  <input
-                    id="set-email"
-                    type="email"
-                    value={settingsDraft.email}
-                    onChange={(e) => setSettingsDraft({ ...settingsDraft, email: e.target.value })}
-                    className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label htmlFor="set-hours" className="text-xs font-semibold">
-                    Operating Hours
-                  </label>
-                  <input
-                    id="set-hours"
-                    type="text"
-                    value={settingsDraft.hoursShort}
-                    onChange={(e) =>
-                      setSettingsDraft({ ...settingsDraft, hoursShort: e.target.value })
-                    }
-                    className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label htmlFor="set-rate" className="text-xs font-semibold">
-                    General Hourly Labor Rate ($)
-                  </label>
-                  <input
-                    id="set-rate"
-                    type="number"
-                    min={0}
-                    max={500}
-                    value={settingsDraft.hourlyRate}
-                    onChange={(e) =>
-                      setSettingsDraft({ ...settingsDraft, hourlyRate: Number(e.target.value) })
-                    }
-                    className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm tabular-nums"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label htmlFor="set-warranty" className="text-xs font-semibold">
-                    Workmanship Warranty (Days)
-                  </label>
-                  <input
-                    id="set-warranty"
-                    type="number"
-                    min={0}
-                    max={365}
-                    value={settingsDraft.warrantyDays}
-                    onChange={(e) =>
-                      setSettingsDraft({ ...settingsDraft, warrantyDays: Number(e.target.value) })
-                    }
-                    className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm tabular-nums"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label htmlFor="set-tagline" className="text-xs font-semibold">
-                    Hero Tagline
-                  </label>
-                  <input
-                    id="set-tagline"
-                    type="text"
-                    value={settingsDraft.tagline}
-                    onChange={(e) =>
-                      setSettingsDraft({ ...settingsDraft, tagline: e.target.value })
-                    }
-                    className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label htmlFor="set-dispatch" className="text-xs font-semibold">
-                    Dispatch / Travel Policy Note
-                  </label>
-                  <input
-                    id="set-dispatch"
-                    type="text"
-                    value={settingsDraft.dispatchPolicyNote}
-                    onChange={(e) =>
-                      setSettingsDraft({ ...settingsDraft, dispatchPolicyNote: e.target.value })
-                    }
-                    className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label htmlFor="set-announcement" className="text-xs font-semibold">
-                    Optional Top Announcement Banner (Leave blank to hide)
-                  </label>
-                  <input
-                    id="set-announcement"
-                    type="text"
-                    value={settingsDraft.announcement}
-                    onChange={(e) =>
-                      setSettingsDraft({ ...settingsDraft, announcement: e.target.value })
-                    }
-                    placeholder="e.g. Booking winter tune-ups — $0 travel fee."
-                    className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <label htmlFor="set-google-place-id" className="text-xs font-semibold">
-                      Google Business Profile Place ID (Live Reviews)
-                    </label>
-                    <a
-                      href="https://developers.google.com/maps/documentation/javascript/examples/places-placeid-finder?utm_campaign=gmp_mcp_codeassist_v1_aistudio"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[11px] font-semibold text-[#E8452C] hover:underline inline-flex items-center gap-1"
-                    >
-                      Find Place ID
-                      <ExternalLink className="w-3 h-3" aria-hidden="true" />
-                    </a>
-                  </div>
-                  <input
-                    id="set-google-place-id"
-                    type="text"
-                    value={settingsDraft.googlePlaceId}
-                    onChange={(e) =>
-                      setSettingsDraft({ ...settingsDraft, googlePlaceId: e.target.value })
-                    }
-                    placeholder="Optional ChIJ... ID (leave blank to auto-search by business name)"
-                    className="w-full min-h-[40px] px-3 rounded-[10px] bg-white border border-black/15 text-sm font-mono"
-                  />
-                </div>
-              </div>
-            </form>
+            <AdminSiteEditor
+              settings={settings}
+              saving={savingSettings}
+              onSave={handleSaveSiteSettings}
+              onNavigate={onNavigate}
+            />
 
             {/* Live Pricing Catalog Editor */}
             <div className="space-y-4">
@@ -1576,6 +1680,16 @@ export function AdminConsole({ services, settings }: AdminConsoleProps) {
               </div>
             </div>
           </div>
+        )}
+
+        {/* TAB 5: REPLIT POSTGRESQL DATA IMPORTER */}
+        {activeTab === 'import' && (
+          <AdminImportPanel
+            services={services}
+            onImportComplete={(entity, count) => {
+              showToast(`Imported ${count} ${entity} record${count === 1 ? '' : 's'} into Firestore.`);
+            }}
+          />
         )}
       </div>
     </section>

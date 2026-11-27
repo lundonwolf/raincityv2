@@ -2,7 +2,7 @@
   "entities": {
     "SiteSettings": {
       "title": "SiteSettings",
-      "description": "Editable global business settings, contact details, labor rate, and dispatch policy for Rain City Scooter.",
+      "description": "Editable global business settings, contact details, labor rate, dispatch policy, and full-site page copy for Rain City Scooter.",
       "type": "object",
       "properties": {
         "businessName": { "type": "string", "minLength": 2, "maxLength": 80 },
@@ -15,6 +15,27 @@
         "warrantyDays": { "type": "number" },
         "announcement": { "type": "string", "maxLength": 240 },
         "googlePlaceId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]*$" },
+        "heroEyebrow": { "type": "string", "maxLength": 80 },
+        "heroHeadline": { "type": "string", "maxLength": 160 },
+        "heroSubcopy": { "type": "string", "maxLength": 360 },
+        "studioKicker": { "type": "string", "maxLength": 80 },
+        "studioHeadline": { "type": "string", "maxLength": 160 },
+        "pricingEyebrow": { "type": "string", "maxLength": 100 },
+        "pricingHeadline": { "type": "string", "maxLength": 140 },
+        "pricingIntro": { "type": "string", "maxLength": 360 },
+        "standupHourlyItems": { "type": "array" },
+        "mobilityHourlyItems": { "type": "array" },
+        "estimateRules": { "type": "array" },
+        "reviewsHeadline": { "type": "string", "maxLength": 140 },
+        "reviewsIntro": { "type": "string", "maxLength": 360 },
+        "supportedBrands": { "type": "array" },
+        "bookingHeadline": { "type": "string", "maxLength": 140 },
+        "bookingIntro": { "type": "string", "maxLength": 360 },
+        "policyEffectiveDate": { "type": "string", "maxLength": 60 },
+        "warrantyHighlightNote": { "type": "string", "maxLength": 600 },
+        "termsScopeNote": { "type": "string", "maxLength": 600 },
+        "privacyIntroNote": { "type": "string", "maxLength": 600 },
+        "footerNote": { "type": "string", "maxLength": 240 },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": [
@@ -91,6 +112,9 @@
         "notes": { "type": "string", "maxLength": 1000 },
         "adminNotes": { "type": "string", "maxLength": 1000 },
         "status": { "type": "string", "enum": ["new", "confirmed", "in_progress", "completed", "cancelled"] },
+        "customerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "confirmationSentAt": { "type": "string", "maxLength": 40 },
+        "confirmationMessageId": { "type": "string", "maxLength": 120 },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -130,6 +154,48 @@
       },
       "required": ["name", "email", "phone", "address", "scooterModel", "serialNumber", "mechanicNotes", "updatedAt"]
     },
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "Self-managed private rider account profile keyed by Firebase Auth UID for booking history, updates, and messaging.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "email": { "type": "string", "format": "email", "minLength": 5, "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 32 },
+        "defaultAddress": { "type": "string", "maxLength": 200 },
+        "defaultScooterModel": { "type": "string", "maxLength": 120 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "email", "phone", "defaultAddress", "defaultScooterModel", "updatedAt"]
+    },
+    "BookingMessage": {
+      "title": "BookingMessage",
+      "description": "Immutable two-way chat message or status/confirmation update scoped to a parent booking.",
+      "type": "object",
+      "properties": {
+        "bookingId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "bookingOwnerEmail": { "type": "string", "format": "email", "minLength": 5, "maxLength": 120 },
+        "bookingOwnerUid": { "type": "string", "maxLength": 128 },
+        "senderUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "senderRole": { "type": "string", "enum": ["customer", "admin"] },
+        "senderName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "messageType": { "type": "string", "enum": ["chat", "status_update", "confirmation_email"] },
+        "body": { "type": "string", "minLength": 1, "maxLength": 1500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "bookingId",
+        "bookingOwnerEmail",
+        "bookingOwnerUid",
+        "senderUid",
+        "senderRole",
+        "senderName",
+        "messageType",
+        "body",
+        "createdAt"
+      ]
+    },
     "AdminUser": {
       "title": "AdminUser",
       "description": "Trusted admin role directory document keyed by Firebase Auth UID.",
@@ -153,7 +219,15 @@
     },
     "/bookings/{bookingId}": {
       "schema": { "$ref": "#/entities/Booking" },
-      "description": "Customer repair bookings. Publicly creatable with strict schema validation; admin-only read, list, update, and delete."
+      "description": "Customer repair bookings. Publicly creatable with strict schema validation; readable by booking owner or admin; admin-only update and delete."
+    },
+    "/bookings/{bookingId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/BookingMessage" },
+      "description": "Two-way customer/admin messages and live status/confirmation email updates scoped strictly to the parent booking."
+    },
+    "/userAccounts/{uid}": {
+      "schema": { "$ref": "#/entities/UserAccount" },
+      "description": "Private customer account profile readable and writable only by the owning verified user (or admin read)."
     },
     "/customers/{customerId}": {
       "schema": { "$ref": "#/entities/CustomerProfile" },

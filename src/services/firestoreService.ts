@@ -10,11 +10,15 @@ import {
   setDoc,
   Timestamp,
   updateDoc,
+  where,
+  type QueryDocumentSnapshot,
   type Unsubscribe,
 } from 'firebase/firestore';
 import {
   DEFAULT_SITE_SETTINGS,
   SCOOTER_SERVICES,
+  type BookingMessageRecord,
+  type BookingMessageType,
   type BookingRecord,
   type BookingStatus,
   type CustomerProfileRecord,
@@ -22,6 +26,7 @@ import {
   type ScooterService,
   type SiteSettings,
   type TimeWindow,
+  type UserAccountRecord,
 } from '../data/scooterData';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 
@@ -39,10 +44,30 @@ function toIsoString(val: unknown): string {
   return new Date().toISOString();
 }
 
+function readOptionalString(val: unknown, fallback: string): string {
+  return typeof val === 'string' ? val : fallback;
+}
+
+function readOptionalNonEmptyString(val: unknown, fallback: string): string {
+  return typeof val === 'string' && val.trim().length > 0 ? val : fallback;
+}
+
+function sanitizeStringList(
+  val: unknown,
+  maxItems: number,
+  maxItemLen: number,
+  fallback: string[],
+): string[] {
+  if (!Array.isArray(val)) return fallback;
+  return val
+    .map((item) => trimStr(String(item ?? ''), maxItemLen))
+    .filter(Boolean)
+    .slice(0, maxItems);
+}
+
 export function subscribeSiteSettings(
   onData: (settings: SiteSettings) => void,
 ): Unsubscribe {
-  const path = 'siteSettings/main';
   return onSnapshot(
     doc(db, 'siteSettings', 'main'),
     (snap) => {
@@ -52,19 +77,69 @@ export function subscribeSiteSettings(
       }
       const d = snap.data();
       onData({
-        businessName: typeof d.businessName === 'string' ? d.businessName : DEFAULT_SITE_SETTINGS.businessName,
-        tagline: typeof d.tagline === 'string' ? d.tagline : DEFAULT_SITE_SETTINGS.tagline,
-        phoneDisplay: typeof d.phoneDisplay === 'string' ? d.phoneDisplay : DEFAULT_SITE_SETTINGS.phoneDisplay,
-        email: typeof d.email === 'string' ? d.email : DEFAULT_SITE_SETTINGS.email,
-        hoursShort: typeof d.hoursShort === 'string' ? d.hoursShort : DEFAULT_SITE_SETTINGS.hoursShort,
+        businessName: readOptionalNonEmptyString(d.businessName, DEFAULT_SITE_SETTINGS.businessName),
+        tagline: readOptionalNonEmptyString(d.tagline, DEFAULT_SITE_SETTINGS.tagline),
+        phoneDisplay: readOptionalNonEmptyString(d.phoneDisplay, DEFAULT_SITE_SETTINGS.phoneDisplay),
+        email: readOptionalNonEmptyString(d.email, DEFAULT_SITE_SETTINGS.email),
+        hoursShort: readOptionalNonEmptyString(d.hoursShort, DEFAULT_SITE_SETTINGS.hoursShort),
         hourlyRate: typeof d.hourlyRate === 'number' ? d.hourlyRate : DEFAULT_SITE_SETTINGS.hourlyRate,
-        dispatchPolicyNote:
-          typeof d.dispatchPolicyNote === 'string'
-            ? d.dispatchPolicyNote
-            : DEFAULT_SITE_SETTINGS.dispatchPolicyNote,
+        dispatchPolicyNote: readOptionalNonEmptyString(
+          d.dispatchPolicyNote,
+          DEFAULT_SITE_SETTINGS.dispatchPolicyNote,
+        ),
         warrantyDays: typeof d.warrantyDays === 'number' ? d.warrantyDays : DEFAULT_SITE_SETTINGS.warrantyDays,
-        announcement: typeof d.announcement === 'string' ? d.announcement : '',
-        googlePlaceId: typeof d.googlePlaceId === 'string' ? d.googlePlaceId : '',
+        announcement: readOptionalString(d.announcement, ''),
+        googlePlaceId: readOptionalString(d.googlePlaceId, ''),
+        heroEyebrow: readOptionalNonEmptyString(d.heroEyebrow, DEFAULT_SITE_SETTINGS.heroEyebrow),
+        heroHeadline: readOptionalNonEmptyString(d.heroHeadline, DEFAULT_SITE_SETTINGS.heroHeadline),
+        heroSubcopy: readOptionalNonEmptyString(d.heroSubcopy, DEFAULT_SITE_SETTINGS.heroSubcopy),
+        studioKicker: readOptionalNonEmptyString(d.studioKicker, DEFAULT_SITE_SETTINGS.studioKicker),
+        studioHeadline: readOptionalNonEmptyString(d.studioHeadline, DEFAULT_SITE_SETTINGS.studioHeadline),
+        pricingEyebrow: readOptionalNonEmptyString(d.pricingEyebrow, DEFAULT_SITE_SETTINGS.pricingEyebrow),
+        pricingHeadline: readOptionalNonEmptyString(d.pricingHeadline, DEFAULT_SITE_SETTINGS.pricingHeadline),
+        pricingIntro: readOptionalNonEmptyString(d.pricingIntro, DEFAULT_SITE_SETTINGS.pricingIntro),
+        standupHourlyItems: sanitizeStringList(
+          d.standupHourlyItems,
+          16,
+          160,
+          DEFAULT_SITE_SETTINGS.standupHourlyItems,
+        ),
+        mobilityHourlyItems: sanitizeStringList(
+          d.mobilityHourlyItems,
+          16,
+          160,
+          DEFAULT_SITE_SETTINGS.mobilityHourlyItems,
+        ),
+        estimateRules: sanitizeStringList(
+          d.estimateRules,
+          16,
+          240,
+          DEFAULT_SITE_SETTINGS.estimateRules,
+        ),
+        reviewsHeadline: readOptionalNonEmptyString(d.reviewsHeadline, DEFAULT_SITE_SETTINGS.reviewsHeadline),
+        reviewsIntro: readOptionalNonEmptyString(d.reviewsIntro, DEFAULT_SITE_SETTINGS.reviewsIntro),
+        supportedBrands: sanitizeStringList(
+          d.supportedBrands,
+          30,
+          60,
+          DEFAULT_SITE_SETTINGS.supportedBrands,
+        ),
+        bookingHeadline: readOptionalNonEmptyString(d.bookingHeadline, DEFAULT_SITE_SETTINGS.bookingHeadline),
+        bookingIntro: readOptionalNonEmptyString(d.bookingIntro, DEFAULT_SITE_SETTINGS.bookingIntro),
+        policyEffectiveDate: readOptionalNonEmptyString(
+          d.policyEffectiveDate,
+          DEFAULT_SITE_SETTINGS.policyEffectiveDate,
+        ),
+        warrantyHighlightNote: readOptionalNonEmptyString(
+          d.warrantyHighlightNote,
+          DEFAULT_SITE_SETTINGS.warrantyHighlightNote,
+        ),
+        termsScopeNote: readOptionalNonEmptyString(d.termsScopeNote, DEFAULT_SITE_SETTINGS.termsScopeNote),
+        privacyIntroNote: readOptionalNonEmptyString(
+          d.privacyIntroNote,
+          DEFAULT_SITE_SETTINGS.privacyIntroNote,
+        ),
+        footerNote: readOptionalString(d.footerNote, ''),
       });
     },
     (error) => {
@@ -95,6 +170,56 @@ export async function saveSiteSettings(settings: SiteSettings): Promise<void> {
       warrantyDays: Math.max(0, Math.min(365, Number(settings.warrantyDays) || 30)),
       announcement: trimStr(settings.announcement || '', 240),
       googlePlaceId: cleanPlaceId,
+      heroEyebrow: trimStr(settings.heroEyebrow || DEFAULT_SITE_SETTINGS.heroEyebrow, 80),
+      heroHeadline: trimStr(settings.heroHeadline || DEFAULT_SITE_SETTINGS.heroHeadline, 160),
+      heroSubcopy: trimStr(settings.heroSubcopy || DEFAULT_SITE_SETTINGS.heroSubcopy, 360),
+      studioKicker: trimStr(settings.studioKicker || DEFAULT_SITE_SETTINGS.studioKicker, 80),
+      studioHeadline: trimStr(settings.studioHeadline || DEFAULT_SITE_SETTINGS.studioHeadline, 160),
+      pricingEyebrow: trimStr(settings.pricingEyebrow || DEFAULT_SITE_SETTINGS.pricingEyebrow, 100),
+      pricingHeadline: trimStr(settings.pricingHeadline || DEFAULT_SITE_SETTINGS.pricingHeadline, 140),
+      pricingIntro: trimStr(settings.pricingIntro || DEFAULT_SITE_SETTINGS.pricingIntro, 360),
+      standupHourlyItems: sanitizeStringList(
+        settings.standupHourlyItems,
+        16,
+        160,
+        DEFAULT_SITE_SETTINGS.standupHourlyItems,
+      ),
+      mobilityHourlyItems: sanitizeStringList(
+        settings.mobilityHourlyItems,
+        16,
+        160,
+        DEFAULT_SITE_SETTINGS.mobilityHourlyItems,
+      ),
+      estimateRules: sanitizeStringList(
+        settings.estimateRules,
+        16,
+        240,
+        DEFAULT_SITE_SETTINGS.estimateRules,
+      ),
+      reviewsHeadline: trimStr(settings.reviewsHeadline || DEFAULT_SITE_SETTINGS.reviewsHeadline, 140),
+      reviewsIntro: trimStr(settings.reviewsIntro || DEFAULT_SITE_SETTINGS.reviewsIntro, 360),
+      supportedBrands: sanitizeStringList(
+        settings.supportedBrands,
+        30,
+        60,
+        DEFAULT_SITE_SETTINGS.supportedBrands,
+      ),
+      bookingHeadline: trimStr(settings.bookingHeadline || DEFAULT_SITE_SETTINGS.bookingHeadline, 140),
+      bookingIntro: trimStr(settings.bookingIntro || DEFAULT_SITE_SETTINGS.bookingIntro, 360),
+      policyEffectiveDate: trimStr(
+        settings.policyEffectiveDate || DEFAULT_SITE_SETTINGS.policyEffectiveDate,
+        60,
+      ),
+      warrantyHighlightNote: trimStr(
+        settings.warrantyHighlightNote || DEFAULT_SITE_SETTINGS.warrantyHighlightNote,
+        600,
+      ),
+      termsScopeNote: trimStr(settings.termsScopeNote || DEFAULT_SITE_SETTINGS.termsScopeNote, 600),
+      privacyIntroNote: trimStr(
+        settings.privacyIntroNote || DEFAULT_SITE_SETTINGS.privacyIntroNote,
+        600,
+      ),
+      footerNote: trimStr(settings.footerNote || '', 240),
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
@@ -203,14 +328,31 @@ export interface CreateBookingPayload {
   estimatedLaborLabel: string;
   estimatedMinutes: number;
   notes: string;
+  customerUid?: string;
 }
 
-export async function createPublicBooking(payload: CreateBookingPayload): Promise<string> {
-  const bookingId = payload.referenceId.replace(/[^a-zA-Z0-9_-]/g, '-');
+export interface AdminImportBookingPayload extends CreateBookingPayload {
+  status: BookingStatus;
+  adminNotes: string;
+  createdAtDate: Date;
+}
+
+export async function importAdminBooking(payload: AdminImportBookingPayload): Promise<string> {
+  const safeRef = trimStr(
+    payload.referenceId.toUpperCase().replace(/[^A-Z0-9-]/g, '-'),
+    32,
+  );
+  const bookingId = safeRef.replace(/[^a-zA-Z0-9_-]/g, '-');
   const path = `bookings/${bookingId}`;
+  const nowMs = Date.now();
+  const safeCreatedMs =
+    Number.isFinite(payload.createdAtDate.getTime()) && payload.createdAtDate.getTime() <= nowMs
+      ? payload.createdAtDate.getTime()
+      : nowMs - 1000;
+
   try {
     await setDoc(doc(db, 'bookings', bookingId), {
-      referenceId: trimStr(payload.referenceId.toUpperCase(), 32),
+      referenceId: safeRef,
       riderName: trimStr(payload.riderName, 100),
       contactEmail: trimStr(payload.contactEmail, 120),
       contactPhone: trimStr(payload.contactPhone, 32),
@@ -223,11 +365,80 @@ export async function createPublicBooking(payload: CreateBookingPayload): Promis
       estimatedLaborLabel: trimStr(payload.estimatedLaborLabel, 64),
       estimatedMinutes: Math.max(0, Math.min(600, Math.round(payload.estimatedMinutes))),
       notes: trimStr(payload.notes || '', 1000),
-      adminNotes: '',
-      status: 'new' as BookingStatus,
-      createdAt: serverTimestamp(),
+      adminNotes: trimStr(payload.adminNotes || '', 1000),
+      status: payload.status,
+      createdAt: Timestamp.fromMillis(safeCreatedMs),
       updatedAt: serverTimestamp(),
     });
+    return bookingId;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+function mapBookingDoc(docSnap: QueryDocumentSnapshot): BookingRecord {
+  const d = docSnap.data();
+  return {
+    id: docSnap.id,
+    referenceId: String(d.referenceId ?? docSnap.id),
+    riderName: String(d.riderName ?? ''),
+    contactEmail: String(d.contactEmail ?? ''),
+    contactPhone: String(d.contactPhone ?? ''),
+    scooterModel: String(d.scooterModel ?? ''),
+    address: String(d.address ?? ''),
+    preferredDay: (d.preferredDay ?? 'Saturday') as OperatingDay,
+    preferredWindow: (d.preferredWindow ?? '10:00 AM – 12:00 PM') as TimeWindow,
+    serviceIds: Array.isArray(d.serviceIds) ? d.serviceIds.map(String) : [],
+    serviceTitles: Array.isArray(d.serviceTitles) ? d.serviceTitles.map(String) : [],
+    estimatedLaborLabel: String(d.estimatedLaborLabel ?? ''),
+    estimatedMinutes: Number(d.estimatedMinutes ?? 0),
+    notes: String(d.notes ?? ''),
+    adminNotes: String(d.adminNotes ?? ''),
+    status: (d.status ?? 'new') as BookingStatus,
+    customerUid:
+      typeof d.customerUid === 'string' && d.customerUid.trim().length > 0
+        ? d.customerUid
+        : undefined,
+    confirmationSentAt:
+      typeof d.confirmationSentAt === 'string' && d.confirmationSentAt.trim().length > 0
+        ? d.confirmationSentAt
+        : undefined,
+    confirmationMessageId:
+      typeof d.confirmationMessageId === 'string' && d.confirmationMessageId.trim().length > 0
+        ? d.confirmationMessageId
+        : undefined,
+    createdAtIso: toIsoString(d.createdAt),
+    updatedAtIso: toIsoString(d.updatedAt),
+  };
+}
+
+export async function createPublicBooking(payload: CreateBookingPayload): Promise<string> {
+  const bookingId = payload.referenceId.replace(/[^a-zA-Z0-9_-]/g, '-');
+  const path = `bookings/${bookingId}`;
+  const docBody: Record<string, unknown> = {
+    referenceId: trimStr(payload.referenceId.toUpperCase(), 32),
+    riderName: trimStr(payload.riderName, 100),
+    contactEmail: trimStr(payload.contactEmail, 120),
+    contactPhone: trimStr(payload.contactPhone, 32),
+    scooterModel: trimStr(payload.scooterModel, 120),
+    address: trimStr(payload.address, 200),
+    preferredDay: payload.preferredDay,
+    preferredWindow: trimStr(payload.preferredWindow, 40),
+    serviceIds: payload.serviceIds.slice(0, 12).map((s) => s.slice(0, 64)),
+    serviceTitles: payload.serviceTitles.slice(0, 12).map((s) => trimStr(s, 120)),
+    estimatedLaborLabel: trimStr(payload.estimatedLaborLabel, 64),
+    estimatedMinutes: Math.max(0, Math.min(600, Math.round(payload.estimatedMinutes))),
+    notes: trimStr(payload.notes || '', 1000),
+    adminNotes: '',
+    status: 'new' as BookingStatus,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+  if (payload.customerUid && /^[a-zA-Z0-9_-]{1,128}$/.test(payload.customerUid)) {
+    docBody.customerUid = payload.customerUid;
+  }
+  try {
+    await setDoc(doc(db, 'bookings', bookingId), docBody);
     return bookingId;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
@@ -243,30 +454,7 @@ export function subscribeAdminBookings(
   return onSnapshot(
     q,
     (snapshot) => {
-      const list: BookingRecord[] = snapshot.docs.map((docSnap) => {
-        const d = docSnap.data();
-        return {
-          id: docSnap.id,
-          referenceId: String(d.referenceId ?? docSnap.id),
-          riderName: String(d.riderName ?? ''),
-          contactEmail: String(d.contactEmail ?? ''),
-          contactPhone: String(d.contactPhone ?? ''),
-          scooterModel: String(d.scooterModel ?? ''),
-          address: String(d.address ?? ''),
-          preferredDay: (d.preferredDay ?? 'Saturday') as OperatingDay,
-          preferredWindow: (d.preferredWindow ?? '10:00 AM – 12:00 PM') as TimeWindow,
-          serviceIds: Array.isArray(d.serviceIds) ? d.serviceIds.map(String) : [],
-          serviceTitles: Array.isArray(d.serviceTitles) ? d.serviceTitles.map(String) : [],
-          estimatedLaborLabel: String(d.estimatedLaborLabel ?? ''),
-          estimatedMinutes: Number(d.estimatedMinutes ?? 0),
-          notes: String(d.notes ?? ''),
-          adminNotes: String(d.adminNotes ?? ''),
-          status: (d.status ?? 'new') as BookingStatus,
-          createdAtIso: toIsoString(d.createdAt),
-          updatedAtIso: toIsoString(d.updatedAt),
-        };
-      });
-      onData(list);
+      onData(snapshot.docs.map(mapBookingDoc));
     },
     (error) => {
       try {
@@ -278,6 +466,66 @@ export function subscribeAdminBookings(
       }
     },
   );
+}
+
+export function subscribeCustomerBookings(
+  uid: string,
+  email: string,
+  onData: (bookings: BookingRecord[]) => void,
+  onError?: (err: Error) => void,
+): Unsubscribe {
+  const byUidMap = new Map<string, BookingRecord>();
+  const byEmailMap = new Map<string, BookingRecord>();
+
+  const emitMerged = () => {
+    const merged = new Map<string, BookingRecord>();
+    for (const [id, rec] of byEmailMap.entries()) merged.set(id, rec);
+    for (const [id, rec] of byUidMap.entries()) merged.set(id, rec);
+    const sorted = Array.from(merged.values()).sort(
+      (a, b) => new Date(b.createdAtIso).getTime() - new Date(a.createdAtIso).getTime(),
+    );
+    onData(sorted);
+  };
+
+  const qUid = query(collection(db, 'bookings'), where('customerUid', '==', uid));
+  const qEmail = query(collection(db, 'bookings'), where('contactEmail', '==', email));
+
+  const unsubUid = onSnapshot(
+    qUid,
+    (snap) => {
+      byUidMap.clear();
+      snap.docs.forEach((docSnap) => byUidMap.set(docSnap.id, mapBookingDoc(docSnap)));
+      emitMerged();
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, 'bookings');
+      } catch (wrapped) {
+        if (onError && wrapped instanceof Error) onError(wrapped);
+      }
+    },
+  );
+
+  const unsubEmail = onSnapshot(
+    qEmail,
+    (snap) => {
+      byEmailMap.clear();
+      snap.docs.forEach((docSnap) => byEmailMap.set(docSnap.id, mapBookingDoc(docSnap)));
+      emitMerged();
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, 'bookings');
+      } catch (wrapped) {
+        if (onError && wrapped instanceof Error) onError(wrapped);
+      }
+    },
+  );
+
+  return () => {
+    unsubUid();
+    unsubEmail();
+  };
 }
 
 export async function updateAdminBooking(
@@ -320,6 +568,181 @@ export async function updateAdminBooking(
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function updateAdminBookingStatus(
+  bookingId: string,
+  status: BookingStatus,
+): Promise<void> {
+  const path = `bookings/${bookingId}`;
+  try {
+    await updateDoc(doc(db, 'bookings', bookingId), {
+      status,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function markBookingConfirmationSent(
+  bookingId: string,
+  options: {
+    status?: BookingStatus;
+    adminNotes?: string;
+    sentAtIso?: string;
+    confirmationMessageId?: string;
+  },
+): Promise<void> {
+  const path = `bookings/${bookingId}`;
+  const payload: Record<string, unknown> = {
+    confirmationSentAt: trimStr(options.sentAtIso ?? new Date().toISOString(), 40),
+    updatedAt: serverTimestamp(),
+  };
+  if (options.status) {
+    payload.status = options.status;
+  }
+  if (typeof options.adminNotes === 'string') {
+    payload.adminNotes = trimStr(options.adminNotes, 1000);
+  }
+  if (typeof options.confirmationMessageId === 'string' && options.confirmationMessageId.trim()) {
+    payload.confirmationMessageId = trimStr(options.confirmationMessageId, 120);
+  }
+  try {
+    await updateDoc(doc(db, 'bookings', bookingId), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export function subscribeUserAccount(
+  uid: string,
+  onData: (account: UserAccountRecord | null) => void,
+  onError?: (err: Error) => void,
+): Unsubscribe {
+  const path = `userAccounts/${uid}`;
+  return onSnapshot(
+    doc(db, 'userAccounts', uid),
+    (snap) => {
+      if (!snap.exists()) {
+        onData(null);
+        return;
+      }
+      const d = snap.data();
+      onData({
+        uid: String(d.uid ?? uid),
+        displayName: String(d.displayName ?? ''),
+        email: String(d.email ?? ''),
+        phone: String(d.phone ?? ''),
+        defaultAddress: String(d.defaultAddress ?? ''),
+        defaultScooterModel: String(d.defaultScooterModel ?? ''),
+        updatedAtIso: toIsoString(d.updatedAt),
+      });
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.GET, path);
+      } catch (wrapped) {
+        if (onError && wrapped instanceof Error) onError(wrapped);
+      }
+    },
+  );
+}
+
+export async function saveUserAccount(
+  account: Omit<UserAccountRecord, 'updatedAtIso'>,
+): Promise<void> {
+  const path = `userAccounts/${account.uid}`;
+  try {
+    await setDoc(doc(db, 'userAccounts', account.uid), {
+      uid: trimStr(account.uid, 128),
+      displayName: trimStr(account.displayName || 'Rider', 100),
+      email: trimStr(account.email, 120),
+      phone: trimStr(account.phone || '', 32),
+      defaultAddress: trimStr(account.defaultAddress || '', 200),
+      defaultScooterModel: trimStr(account.defaultScooterModel || '', 120),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export function subscribeBookingMessages(
+  bookingId: string,
+  viewer: { role: 'admin' } | { role: 'customer'; email: string },
+  onData: (messages: BookingMessageRecord[]) => void,
+  onError?: (err: Error) => void,
+): Unsubscribe {
+  const path = `bookings/${bookingId}/messages`;
+  const messagesRef = collection(db, 'bookings', bookingId, 'messages');
+  const q =
+    viewer.role === 'admin'
+      ? query(messagesRef, orderBy('createdAt', 'asc'))
+      : query(messagesRef, where('bookingOwnerEmail', '==', viewer.email));
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const list: BookingMessageRecord[] = snapshot.docs
+        .map((docSnap) => {
+          const d = docSnap.data();
+          return {
+            id: docSnap.id,
+            bookingId: String(d.bookingId ?? bookingId),
+            bookingOwnerEmail: String(d.bookingOwnerEmail ?? ''),
+            bookingOwnerUid: String(d.bookingOwnerUid ?? ''),
+            senderUid: String(d.senderUid ?? ''),
+            senderRole: d.senderRole === 'admin' ? ('admin' as const) : ('customer' as const),
+            senderName: String(d.senderName ?? ''),
+            messageType: (d.messageType ?? 'chat') as BookingMessageType,
+            body: String(d.body ?? ''),
+            createdAtIso: toIsoString(d.createdAt),
+          };
+        })
+        .sort((a, b) => new Date(a.createdAtIso).getTime() - new Date(b.createdAtIso).getTime());
+      onData(list);
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (wrapped) {
+        if (onError && wrapped instanceof Error) onError(wrapped);
+      }
+    },
+  );
+}
+
+export async function sendBookingMessage(payload: {
+  booking: BookingRecord;
+  senderUid: string;
+  senderRole: 'customer' | 'admin';
+  senderName: string;
+  messageType: BookingMessageType;
+  body: string;
+}): Promise<string> {
+  const messageId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const path = `bookings/${payload.booking.id}/messages/${messageId}`;
+  const cleanBody = trimStr(payload.body, 1500);
+  if (!cleanBody) {
+    throw new Error('Message text cannot be empty.');
+  }
+  try {
+    await setDoc(doc(db, 'bookings', payload.booking.id, 'messages', messageId), {
+      bookingId: payload.booking.id,
+      bookingOwnerEmail: trimStr(payload.booking.contactEmail, 120),
+      bookingOwnerUid: trimStr(payload.booking.customerUid ?? '', 128),
+      senderUid: trimStr(payload.senderUid, 128),
+      senderRole: payload.senderRole,
+      senderName: trimStr(payload.senderName || 'User', 100),
+      messageType: payload.messageType,
+      body: cleanBody,
+      createdAt: serverTimestamp(),
+    });
+    return messageId;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
   }
 }
 

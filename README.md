@@ -19,7 +19,7 @@ Modern web application for **Rain City Scooter** — independent mobile electric
 
 1. **Install dependencies** (requires Node.js 20+):
    ```bash
-   npm ci
+   npm install
    ```
 2. **Create a local `.env` file** based on `.env.example`:
    ```bash

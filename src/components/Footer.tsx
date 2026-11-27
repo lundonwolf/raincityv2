@@ -27,7 +27,9 @@ export function Footer({ settings, onNavigate }: FooterProps) {
             {settings.businessName}
           </a>
           <p className="text-xs text-[#A1A1AA] leading-relaxed max-w-xs">
-            {settings.tagline} {settings.hoursShort}.
+            {settings.footerNote.trim()
+              ? settings.footerNote
+              : `${settings.tagline} ${settings.hoursShort}.`}
           </p>
         </div>
 
@@ -46,6 +48,9 @@ export function Footer({ settings, onNavigate }: FooterProps) {
               </a>
               <a href="/book" onClick={(e) => go(e, '/book')} className="hover:text-[#F4F4F0]">
                 Book Repair
+              </a>
+              <a href="/account" onClick={(e) => go(e, '/account')} className="hover:text-[#F4F4F0]">
+                My Account
               </a>
             </div>
           </nav>

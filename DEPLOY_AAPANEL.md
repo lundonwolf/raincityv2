@@ -77,9 +77,11 @@ From inside `/www/wwwroot/raincityscooter.com`, verify Node.js is v20+ and build
 
 ```bash
 node -v
-npm ci
+npm install
 npm run build
 ```
+
+> **Tip:** If aaPanel prints a cache permission warning for `/www/server/nodejs/cache`, run `npm install --cache /tmp/.npm` instead (or run as `root` in aaPanel Terminal).
 
 When the build completes, Vite creates `/www/wwwroot/raincityscooter.com/dist/` containing:
 - `index.html`
@@ -227,7 +229,7 @@ set -euo pipefail
 cd /www/wwwroot/raincityscooter.com
 git fetch origin main
 git reset --hard origin/main
-npm ci
+npm install --cache /tmp/.npm
 npm run build
 echo "Rain City Scooter deployed successfully at $(date)"
 ```
@@ -272,4 +274,6 @@ Whenever you push changes to GitHub, run:
 | **Reviews show API key / referrer error** (`RefererNotAllowedMapError`) | Google Maps key missing or referrer restriction doesn't include your domain | Verify `.env.production` has `VITE_GOOGLE_MAPS_API_KEY`, allow `https://raincityscooter.com/*` in Google Cloud Credentials, and re-run `npm run build` (Step 2 & 3). |
 | **Reviews say "Place ID Needed"** | Service-area / mobile Google Business Profiles sometimes don't return on text search | Open `/admin` → **Site Data & Pricing**, paste your Google Place ID (`ChIJ...`), and click **Publish Site Settings**. |
 | **`npm run build` fails with syntax or engine errors** | System default Node version is too old (< 20) | Install Node.js 20+ via aaPanel **Node Version Manager** and run `node -v` to confirm before building. |
+| **`npm ci` fails with `EUSAGE` / missing `package-lock.json`** | Repository uses `bun.lock` rather than `package-lock.json` | Run `npm install` (or `npm install --cache /tmp/.npm` if `/www/server/nodejs/cache` isn't writable). |
+| **`npm install` fails with `ERESOLVE` peer conflict** | Stale `esbuild` pin conflicting with Vite 8 | Pull the latest `package.json` or run `npm install --legacy-peer-deps --cache /tmp/.npm`. |
 | **Hero background image missing on live site** | Uploaded source files instead of building with Vite | Always run `npm run build` and point aaPanel **Running directory** to `/dist` (Step 3 & 4). |

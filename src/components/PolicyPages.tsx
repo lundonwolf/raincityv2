@@ -23,7 +23,7 @@ export function PolicyPages({ activePolicy, settings, onNavigate }: PolicyPagesP
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-white/10 pb-8">
           <div className="space-y-3">
             <p className="font-mono text-xs tracking-wider text-[#A1A1AA]">
-              Legal & Service Documentation · Effective September 24, 2026
+              Legal & Service Documentation · Effective {settings.policyEffectiveDate}
             </p>
             <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-[#F4F4F0] [text-wrap:balance]">
               {activePolicy === '/warranty' && 'Warranty & Returns Policy'}
@@ -71,11 +71,7 @@ export function PolicyPages({ activePolicy, settings, onNavigate }: PolicyPagesP
                 </div>
               </div>
               <p className="text-sm sm:text-base text-[#27272A] leading-relaxed">
-                Unless otherwise stated on your invoice, repair labor performed by{' '}
-                {settings.businessName} carries a{' '}
-                <strong>{settings.warrantyDays}-day workmanship warranty</strong> beginning on the
-                date the repair is completed. When a covered workmanship issue is confirmed, our
-                first remedy is to correct or repeat the affected labor at no additional charge.
+                {settings.warrantyHighlightNote}
               </p>
             </div>
 
@@ -155,11 +151,7 @@ export function PolicyPages({ activePolicy, settings, onNavigate }: PolicyPagesP
             <article className="rounded-[20px] bg-[#F4F4F0] text-[#121214] p-6 sm:p-7 border border-black/10 space-y-3">
               <h2 className="text-lg font-semibold">1. Mobile Service Scope & Safety</h2>
               <p className="text-sm text-[#27272A] leading-relaxed">
-                {settings.businessName} is an independent mobile repair practice. We visit your
-                location for on-site repairs and offer pickup by arrangement for complex bench work.
-                We may decline, pause, or reschedule work whenever site safety, weather, electrical
-                hazards, swollen or damaged lithium batteries, or unsafe equipment make mobile work
-                unsafe.
+                {settings.termsScopeNote}
               </p>
             </article>
 
@@ -251,9 +243,7 @@ export function PolicyPages({ activePolicy, settings, onNavigate }: PolicyPagesP
             <article className="rounded-[20px] bg-[#F4F4F0] text-[#121214] p-6 sm:p-7 border border-black/10 space-y-3">
               <h2 className="text-lg font-semibold">1. Information We Collect</h2>
               <p className="text-sm text-[#27272A] leading-relaxed">
-                {settings.businessName} collects only information reasonably required to schedule
-                mobile visits, perform safe repairs, maintain warranty records, and communicate with
-                you:
+                {settings.privacyIntroNote}
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 text-xs text-[#27272A]">
                 <div className="rounded-[12px] bg-white p-4 border border-black/10 space-y-1">

@@ -33,6 +33,33 @@ export interface SiteSettings {
   warrantyDays: number;
   announcement: string;
   googlePlaceId: string;
+  // Home page copy
+  heroEyebrow: string;
+  heroHeadline: string;
+  heroSubcopy: string;
+  studioKicker: string;
+  studioHeadline: string;
+  // Pricing page copy & lists
+  pricingEyebrow: string;
+  pricingHeadline: string;
+  pricingIntro: string;
+  standupHourlyItems: string[];
+  mobilityHourlyItems: string[];
+  estimateRules: string[];
+  // Reviews & brands page copy
+  reviewsHeadline: string;
+  reviewsIntro: string;
+  supportedBrands: string[];
+  // Booking page copy
+  bookingHeadline: string;
+  bookingIntro: string;
+  // Policy pages copy
+  policyEffectiveDate: string;
+  warrantyHighlightNote: string;
+  termsScopeNote: string;
+  privacyIntroNote: string;
+  // Footer
+  footerNote: string;
 }
 
 export type BookingStatus = 'new' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled';
@@ -54,8 +81,36 @@ export interface BookingRecord {
   notes: string;
   adminNotes: string;
   status: BookingStatus;
+  customerUid?: string;
+  confirmationSentAt?: string;
+  confirmationMessageId?: string;
   createdAtIso: string;
   updatedAtIso: string;
+}
+
+export interface UserAccountRecord {
+  uid: string;
+  displayName: string;
+  email: string;
+  phone: string;
+  defaultAddress: string;
+  defaultScooterModel: string;
+  updatedAtIso: string;
+}
+
+export type BookingMessageType = 'chat' | 'status_update' | 'confirmation_email';
+
+export interface BookingMessageRecord {
+  id: string;
+  bookingId: string;
+  bookingOwnerEmail: string;
+  bookingOwnerUid: string;
+  senderUid: string;
+  senderRole: 'customer' | 'admin';
+  senderName: string;
+  messageType: BookingMessageType;
+  body: string;
+  createdAtIso: string;
 }
 
 export interface CustomerProfileRecord {
@@ -80,6 +135,49 @@ export const TIME_WINDOWS = [
 ] as const;
 export type TimeWindow = (typeof TIME_WINDOWS)[number];
 
+export const STANDUP_HOURLY_ITEMS = [
+  'Other diagnostic and inspection work',
+  'Tire and tube replacement',
+  'Solid tire installation',
+  'Brake adjustment, pads, cables, and rotors',
+  'Hydraulic bleeding, where supported',
+  'Compatible throttle, display, and charging-port replacement',
+  'Compatible controller, battery-pack, and motor-wheel replacement',
+  'Steering, folding mechanism, wiring, bearing, and suspension repairs',
+];
+
+export const MOBILITY_HOURLY_ITEMS = [
+  'Inspections and function tests',
+  'Battery and charging-system testing',
+  'Battery replacement',
+  'Control, wiring, motor, and brake work',
+];
+
+export const ESTIMATE_RULES = [
+  'Basic inspection is $30 and electrical diagnosis is $45 for up to 40 minutes. Other labor is $45/hour.',
+  'There are no dispatch or travel fees.',
+  'Electrical diagnosis ($45) is credited when a repair quote includes the same troubleshooting work.',
+  'Package prices cover listed labor; parts (including brake pads) and applicable tax are additional.',
+  'No duplicate labor is charged for work already included in a package.',
+  'Complex access, seized hardware, and unusual assemblies may increase repair time; scope changes are discussed first.',
+  'Complete battery-pack replacement is offered; internal battery rebuilding is outside this menu.',
+];
+
+export const SUPPORTED_BRANDS = [
+  'Segway Ninebot',
+  'Apollo',
+  'NIU',
+  'Dualtron',
+  'Kaabo',
+  'VSETT',
+  'Xiaomi',
+  'Hiboy',
+  'FluidFreeride',
+  'Gotrax',
+  'Inokim',
+  'NAMI',
+];
+
 export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   businessName: 'Rain City Scooter',
   tagline: 'Independent mobile electric scooter repair.',
@@ -91,6 +189,34 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   warrantyDays: 30,
   announcement: '',
   googlePlaceId: '',
+  heroEyebrow: 'Mobile Electric Scooter Repair',
+  heroHeadline: 'Mobile scooter repair, engineered like an instrument.',
+  heroSubcopy:
+    'Independent mobile electric scooter repair. Basic inspection is $30, tune-ups start at $65, and general labor is $45/hour—with zero travel or dispatch fees.',
+  studioKicker: 'ONE LOCAL MECHANIC',
+  studioHeadline: 'Built for Seattle rain, hills, and daily electric commuting.',
+  pricingEyebrow: 'Straightforward Labor Menu · Zero Travel Charges',
+  pricingHeadline: 'Know the labor. Agree the scope.',
+  pricingIntro:
+    'Basic inspection is $30 and electrical diagnosis is $45 for up to 40 minutes. Other labor is $45/hour. Parts and applicable tax are extra; no dispatch or travel fees.',
+  standupHourlyItems: STANDUP_HOURLY_ITEMS,
+  mobilityHourlyItems: MOBILITY_HOURLY_ITEMS,
+  estimateRules: ESTIMATE_RULES,
+  reviewsHeadline: 'Real feedback from verified Google reviewers.',
+  reviewsIntro:
+    'Every rating and review below is fetched live from Google Maps—no fabricated quotes, no edited excerpts, and transparent pricing backed by our workmanship warranty.',
+  supportedBrands: SUPPORTED_BRANDS,
+  bookingHeadline: 'Schedule your mobile repair visit.',
+  bookingIntro:
+    'No upfront payment required. We confirm component compatibility, repair scope, and arrival timing before dispatching.',
+  policyEffectiveDate: 'September 24, 2026',
+  warrantyHighlightNote:
+    'Unless otherwise stated on your invoice, repair labor performed by Rain City Scooter carries a 30-day workmanship warranty beginning on the date the repair is completed. When a covered workmanship issue is confirmed, our first remedy is to correct or repeat the affected labor at no additional charge.',
+  termsScopeNote:
+    'Rain City Scooter is an independent mobile repair practice. We visit your location for on-site repairs and offer pickup by arrangement for complex bench work. We may decline, pause, or reschedule work whenever site safety, weather, electrical hazards, swollen or damaged lithium batteries, or unsafe equipment make mobile work unsafe.',
+  privacyIntroNote:
+    'Rain City Scooter collects only information reasonably required to schedule mobile visits, perform safe repairs, maintain warranty records, and communicate with you:',
+  footerNote: '',
 };
 
 /**
@@ -298,45 +424,3 @@ export const SCOOTER_SERVICES: ScooterService[] = [
   },
 ];
 
-export const STANDUP_HOURLY_ITEMS = [
-  'Other diagnostic and inspection work',
-  'Tire and tube replacement',
-  'Solid tire installation',
-  'Brake adjustment, pads, cables, and rotors',
-  'Hydraulic bleeding, where supported',
-  'Compatible throttle, display, and charging-port replacement',
-  'Compatible controller, battery-pack, and motor-wheel replacement',
-  'Steering, folding mechanism, wiring, bearing, and suspension repairs',
-];
-
-export const MOBILITY_HOURLY_ITEMS = [
-  'Inspections and function tests',
-  'Battery and charging-system testing',
-  'Battery replacement',
-  'Control, wiring, motor, and brake work',
-];
-
-export const ESTIMATE_RULES = [
-  'Basic inspection is $30 and electrical diagnosis is $45 for up to 40 minutes. Other labor is $45/hour.',
-  'There are no dispatch or travel fees.',
-  'Electrical diagnosis ($45) is credited when a repair quote includes the same troubleshooting work.',
-  'Package prices cover listed labor; parts (including brake pads) and applicable tax are additional.',
-  'No duplicate labor is charged for work already included in a package.',
-  'Complex access, seized hardware, and unusual assemblies may increase repair time; scope changes are discussed first.',
-  'Complete battery-pack replacement is offered; internal battery rebuilding is outside this menu.',
-];
-
-export const SUPPORTED_BRANDS = [
-  'Segway Ninebot',
-  'Apollo',
-  'NIU',
-  'Dualtron',
-  'Kaabo',
-  'VSETT',
-  'Xiaomi',
-  'Hiboy',
-  'FluidFreeride',
-  'Gotrax',
-  'Inokim',
-  'NAMI',
-];

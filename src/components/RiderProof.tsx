@@ -8,7 +8,7 @@ import {
   Settings,
   Star,
 } from 'lucide-react';
-import { SUPPORTED_BRANDS, type SiteSettings } from '../data/scooterData';
+import type { SiteSettings } from '../data/scooterData';
 import { useGoogleReviews } from '../hooks/useGoogleReviews';
 import type { AppRoute } from '../types/routes';
 import { getAuthorInitials, type GoogleReviewItem } from '../utils/googleReviewsHelpers';
@@ -413,11 +413,12 @@ function LiveGoogleReviewsFeed({
 }
 
 export function RiderProof({ settings, hasMapsApiKey, onNavigate }: RiderProofProps) {
+  const brandCount = settings.supportedBrands.length;
   const metrics = [
     { value: '$0 fees', label: 'No dispatch or travel fees' },
     { value: `${settings.warrantyDays} days`, label: 'Workmanship warranty on every repair and tune' },
     { value: `$${settings.hourlyRate}/hr`, label: 'Transparent hourly labor outside fixed packages' },
-    { value: '12+ brands', label: 'Commuter, dual-motor, and mobility scooters serviced' },
+    { value: `${brandCount}+ brands`, label: 'Commuter, dual-motor, and mobility scooters serviced' },
   ];
 
   return (
@@ -436,14 +437,12 @@ export function RiderProof({ settings, hasMapsApiKey, onNavigate }: RiderProofPr
               id="reviews-heading"
               className="text-3xl sm:text-5xl font-semibold tracking-tight text-[#F4F4F0] [text-wrap:balance]"
             >
-              Real feedback from verified Google reviewers.
+              {settings.reviewsHeadline}
             </h1>
           </div>
 
           <p className="text-sm text-[#A1A1AA] max-w-md leading-relaxed">
-            Every rating and review below is fetched live from Google Maps—no fabricated quotes, no
-            edited excerpts, and transparent pricing backed by our {settings.warrantyDays}-day
-            workmanship warranty.
+            {settings.reviewsIntro}
           </p>
         </div>
 
@@ -483,7 +482,7 @@ export function RiderProof({ settings, hasMapsApiKey, onNavigate }: RiderProofPr
           <div className="space-y-1.5">
             <span className="font-mono text-xs text-[#A1A1AA] block">COMMON MAKES SERVICED</span>
             <p className="text-sm text-[#E4E4E7] leading-relaxed">
-              {SUPPORTED_BRANDS.join(' · ')}
+              {settings.supportedBrands.join(' · ')}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3 shrink-0">
