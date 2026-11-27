@@ -1,0 +1,167 @@
+{
+  "entities": {
+    "SiteSettings": {
+      "title": "SiteSettings",
+      "description": "Editable global business settings, contact details, labor rate, and dispatch policy for Rain City Scooter.",
+      "type": "object",
+      "properties": {
+        "businessName": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "tagline": { "type": "string", "minLength": 4, "maxLength": 180 },
+        "phoneDisplay": { "type": "string", "minLength": 7, "maxLength": 32 },
+        "email": { "type": "string", "format": "email", "minLength": 5, "maxLength": 120 },
+        "hoursShort": { "type": "string", "minLength": 4, "maxLength": 100 },
+        "hourlyRate": { "type": "number" },
+        "dispatchPolicyNote": { "type": "string", "minLength": 4, "maxLength": 240 },
+        "warrantyDays": { "type": "number" },
+        "announcement": { "type": "string", "maxLength": 240 },
+        "googlePlaceId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]*$" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "businessName",
+        "tagline",
+        "phoneDisplay",
+        "email",
+        "hoursShort",
+        "hourlyRate",
+        "dispatchPolicyNote",
+        "warrantyDays",
+        "announcement",
+        "updatedAt"
+      ]
+    },
+    "ServicePackage": {
+      "title": "ServicePackage",
+      "description": "Editable repair package or labor service displayed on the Pricing & Services page.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 2, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "index": { "type": "string", "minLength": 1, "maxLength": 8 },
+        "title": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "shortLabel": { "type": "string", "minLength": 2, "maxLength": 48 },
+        "category": { "type": "string", "enum": ["packages", "standup", "mobility", "electrical"] },
+        "categoryLabel": { "type": "string", "minLength": 2, "maxLength": 48 },
+        "pricingType": { "type": "string", "enum": ["fixed", "from", "hourly"] },
+        "price": { "type": "number" },
+        "durationMinutes": { "type": "number" },
+        "mode": { "type": "string", "enum": ["mobile", "pickup"] },
+        "summary": { "type": "string", "minLength": 4, "maxLength": 400 },
+        "includes": { "type": "array" },
+        "featuredTone": { "type": "string", "enum": ["light", "dark"] },
+        "active": { "type": "boolean" },
+        "sortOrder": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "index",
+        "title",
+        "shortLabel",
+        "category",
+        "categoryLabel",
+        "pricingType",
+        "price",
+        "durationMinutes",
+        "mode",
+        "summary",
+        "includes",
+        "featuredTone",
+        "active",
+        "sortOrder",
+        "updatedAt"
+      ]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "Customer mobile repair booking request containing PII, restricted to admin read/update/delete.",
+      "type": "object",
+      "properties": {
+        "referenceId": { "type": "string", "minLength": 6, "maxLength": 32, "pattern": "^[A-Z0-9\\-]+$" },
+        "riderName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "contactEmail": { "type": "string", "format": "email", "minLength": 5, "maxLength": 120 },
+        "contactPhone": { "type": "string", "minLength": 7, "maxLength": 32 },
+        "scooterModel": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "address": { "type": "string", "minLength": 5, "maxLength": 200 },
+        "preferredDay": { "type": "string", "enum": ["Monday", "Friday", "Saturday", "Sunday"] },
+        "preferredWindow": { "type": "string", "minLength": 4, "maxLength": 40 },
+        "serviceIds": { "type": "array" },
+        "serviceTitles": { "type": "array" },
+        "estimatedLaborLabel": { "type": "string", "minLength": 2, "maxLength": 64 },
+        "estimatedMinutes": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "adminNotes": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["new", "confirmed", "in_progress", "completed", "cancelled"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "referenceId",
+        "riderName",
+        "contactEmail",
+        "contactPhone",
+        "scooterModel",
+        "address",
+        "preferredDay",
+        "preferredWindow",
+        "serviceIds",
+        "serviceTitles",
+        "estimatedLaborLabel",
+        "estimatedMinutes",
+        "notes",
+        "adminNotes",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CustomerProfile": {
+      "title": "CustomerProfile",
+      "description": "Admin-managed CRM profile for repeat Seattle scooter riders and equipment notes.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "email": { "type": "string", "format": "email", "minLength": 5, "maxLength": 120 },
+        "phone": { "type": "string", "minLength": 7, "maxLength": 32 },
+        "address": { "type": "string", "maxLength": 200 },
+        "scooterModel": { "type": "string", "maxLength": 120 },
+        "serialNumber": { "type": "string", "maxLength": 80 },
+        "mechanicNotes": { "type": "string", "maxLength": 1200 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "email", "phone", "address", "scooterModel", "serialNumber", "mechanicNotes", "updatedAt"]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Trusted admin role directory document keyed by Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email", "minLength": 5, "maxLength": 120 },
+        "role": { "type": "string", "enum": ["admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "role", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/siteSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/SiteSettings" },
+      "description": "Publicly readable, admin-writable global site settings (document ID: main)."
+    },
+    "/services/{serviceId}": {
+      "schema": { "$ref": "#/entities/ServicePackage" },
+      "description": "Publicly readable, admin-writable service packages and labor offerings."
+    },
+    "/bookings/{bookingId}": {
+      "schema": { "$ref": "#/entities/Booking" },
+      "description": "Customer repair bookings. Publicly creatable with strict schema validation; admin-only read, list, update, and delete."
+    },
+    "/customers/{customerId}": {
+      "schema": { "$ref": "#/entities/CustomerProfile" },
+      "description": "Private customer CRM profiles strictly restricted to verified admins."
+    },
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Admin role table strictly restricted to verified admins."
+    }
+  }
+}

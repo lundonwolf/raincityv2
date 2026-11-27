@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-dot: "Doto", "JetBrains Mono", monospace;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-obsidian: #09090b;
+  --color-panel: #131316;
+  --color-chalk: #f2f2ee;
+  --color-anodized: #e5e5e0;
+  --color-ink: #121214;
+  --color-vermilion: #e8452c;
+  --color-signal-blue: #4a82e8;
+  --color-ochre: #c79b5e;
+}
+
+@layer base {
+  html {
+    background-color: #09090b;
+    color: #f4f4f0;
+    font-family: var(--font-sans);
+  }
+
+  :focus-visible {
+    outline: 2px solid #e8452c;
+    outline-offset: 2px;
+  }
+}
+
+.font-dot {
+  font-family: var(--font-dot);
+  font-variant-numeric: tabular-nums;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tactile Teenage Engineering OP-1 inspired hardware keycap */
+.hw-key {
+  background: linear-gradient(180deg, #fafaf7 0%, #ededeb 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 2px 4px rgba(0, 0, 0, 0.14),
+    0 0 0 1px rgba(18, 18, 20, 0.12);
+  transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 140ms cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 140ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.hw-key:hover {
+  background: linear-gradient(180deg, #ffffff 0%, #f1f1ed 100%);
+}
+
+.hw-key:active,
+.hw-key-active {
+  transform: translateY(1px);
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.14),
+    0 0 0 1px rgba(232, 69, 44, 0.55);
+}
+
+/* Anodized aluminum hardware deck surface */
+.hw-chassis {
+  background: linear-gradient(180deg, #f1f1ed 0%, #e4e4df 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 20px 50px rgba(0, 0, 0, 0.45);
+}
+
+/* Speaker grille perforation pattern */
+.hw-grille {
+  background-image: radial-gradient(circle, rgba(18, 18, 20, 0.42) 1.5px, transparent 1.7px);
+  background-size: 7px 7px;
+}
+
+/* Recessed OLED display well */
+.oled-well {
+  background: #08080a;
+  box-shadow:
+    inset 0 2px 8px rgba(0, 0, 0, 0.85),
+    0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,0 +1,257 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net — default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'lundonwolf@gmail.com' ||
+        request.auth.token.email == 'Lundonwolf@gmail.com'
+      );
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isNonEmptyString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isOptionalString(val, maxLen) {
+      return val is string && val.size() <= maxLen;
+    }
+
+    // 3. Entity Validation Blueprints
+    function isValidSiteSettings(data) {
+      return data.keys().hasAll([
+          'businessName', 'tagline', 'phoneDisplay', 'email', 'hoursShort',
+          'hourlyRate', 'dispatchPolicyNote', 'warrantyDays', 'announcement', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'businessName', 'tagline', 'phoneDisplay', 'email', 'hoursShort',
+          'hourlyRate', 'dispatchPolicyNote', 'warrantyDays', 'announcement',
+          'googlePlaceId', 'updatedAt'
+        ])
+        && isNonEmptyString(data.businessName, 2, 80)
+        && isNonEmptyString(data.tagline, 4, 180)
+        && isNonEmptyString(data.phoneDisplay, 7, 32)
+        && isNonEmptyString(data.email, 5, 120)
+        && isNonEmptyString(data.hoursShort, 4, 100)
+        && data.hourlyRate is number && data.hourlyRate >= 0 && data.hourlyRate <= 500
+        && isNonEmptyString(data.dispatchPolicyNote, 4, 240)
+        && data.warrantyDays is number && data.warrantyDays >= 0 && data.warrantyDays <= 365
+        && isOptionalString(data.announcement, 240)
+        && (!('googlePlaceId' in data) || (
+          data.googlePlaceId is string
+          && data.googlePlaceId.size() <= 128
+          && data.googlePlaceId.matches('^[a-zA-Z0-9_\\-]*$')
+        ))
+        && data.updatedAt == request.time;
+    }
+
+    function isValidServicePackage(data) {
+      return data.keys().hasAll([
+          'id', 'index', 'title', 'shortLabel', 'category', 'categoryLabel',
+          'pricingType', 'price', 'durationMinutes', 'mode', 'summary',
+          'includes', 'featuredTone', 'active', 'sortOrder', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'index', 'title', 'shortLabel', 'category', 'categoryLabel',
+          'pricingType', 'price', 'durationMinutes', 'mode', 'summary',
+          'includes', 'featuredTone', 'active', 'sortOrder', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isNonEmptyString(data.index, 1, 8)
+        && isNonEmptyString(data.title, 2, 100)
+        && isNonEmptyString(data.shortLabel, 2, 48)
+        && data.category in ['packages', 'standup', 'mobility', 'electrical']
+        && isNonEmptyString(data.categoryLabel, 2, 48)
+        && data.pricingType in ['fixed', 'from', 'hourly']
+        && data.price is number && data.price >= 0 && data.price <= 2000
+        && data.durationMinutes is number && data.durationMinutes >= 5 && data.durationMinutes <= 480
+        && data.mode in ['mobile', 'pickup']
+        && isNonEmptyString(data.summary, 4, 400)
+        && data.includes is list && data.includes.size() >= 1 && data.includes.size() <= 8
+        && data.includes[0] is string && data.includes[0].size() <= 160
+        && data.featuredTone in ['light', 'dark']
+        && data.active is bool
+        && data.sortOrder is number && data.sortOrder >= 0 && data.sortOrder <= 100
+        && data.updatedAt == request.time;
+    }
+
+    function isValidBookingBase(data) {
+      return data.keys().hasAll([
+          'referenceId', 'riderName', 'contactEmail', 'contactPhone',
+          'scooterModel', 'address', 'preferredDay',
+          'preferredWindow', 'serviceIds', 'serviceTitles',
+          'estimatedLaborLabel', 'estimatedMinutes', 'notes', 'adminNotes',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'referenceId', 'riderName', 'contactEmail', 'contactPhone',
+          'scooterModel', 'address', 'zoneId', 'zoneName', 'preferredDay',
+          'preferredWindow', 'serviceIds', 'serviceTitles',
+          'estimatedLaborLabel', 'estimatedMinutes', 'notes', 'adminNotes',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && isNonEmptyString(data.referenceId, 6, 32)
+        && data.referenceId.matches('^[A-Z0-9\\-]+$')
+        && isNonEmptyString(data.riderName, 2, 100)
+        && isNonEmptyString(data.contactEmail, 5, 120)
+        && isNonEmptyString(data.contactPhone, 7, 32)
+        && isNonEmptyString(data.scooterModel, 2, 120)
+        && isNonEmptyString(data.address, 5, 200)
+        && (!('zoneId' in data) || isValidId(data.zoneId))
+        && (!('zoneName' in data) || isNonEmptyString(data.zoneName, 2, 80))
+        && data.preferredDay in ['Monday', 'Friday', 'Saturday', 'Sunday']
+        && isNonEmptyString(data.preferredWindow, 4, 40)
+        && data.serviceIds is list && data.serviceIds.size() >= 1 && data.serviceIds.size() <= 12
+        && data.serviceIds[0] is string && data.serviceIds[0].size() <= 64
+        && data.serviceTitles is list && data.serviceTitles.size() >= 1 && data.serviceTitles.size() <= 12
+        && data.serviceTitles[0] is string && data.serviceTitles[0].size() <= 120
+        && isNonEmptyString(data.estimatedLaborLabel, 2, 64)
+        && data.estimatedMinutes is number && data.estimatedMinutes >= 0 && data.estimatedMinutes <= 600
+        && isOptionalString(data.notes, 1000)
+        && isOptionalString(data.adminNotes, 1000)
+        && data.status in ['new', 'confirmed', 'in_progress', 'completed', 'cancelled']
+        && data.updatedAt == request.time;
+    }
+
+    function isValidCustomerProfile(data) {
+      return data.keys().hasAll([
+          'name', 'email', 'phone', 'address', 'scooterModel',
+          'serialNumber', 'mechanicNotes', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'name', 'email', 'phone', 'address', 'scooterModel',
+          'serialNumber', 'mechanicNotes', 'updatedAt'
+        ])
+        && isNonEmptyString(data.name, 2, 100)
+        && isNonEmptyString(data.email, 5, 120)
+        && isNonEmptyString(data.phone, 7, 32)
+        && isOptionalString(data.address, 200)
+        && isOptionalString(data.scooterModel, 120)
+        && isOptionalString(data.serialNumber, 80)
+        && isOptionalString(data.mechanicNotes, 1200)
+        && data.updatedAt == request.time;
+    }
+
+    function isValidAdminUser(data) {
+      return data.keys().hasAll(['email', 'role', 'createdAt'])
+        && data.keys().hasOnly(['email', 'role', 'createdAt'])
+        && isNonEmptyString(data.email, 5, 120)
+        && data.role == 'admin'
+        && data.createdAt == request.time;
+    }
+
+    // 4. Collection Rules (Auth -> Static Validation -> Relational Check)
+    match /siteSettings/{settingId} {
+      allow get: if isValidId(settingId);
+      allow list: if false;
+      allow create: if isVerifiedUser() && isValidId(settingId) && isValidSiteSettings(incoming()) && isAdmin();
+      allow update: if isVerifiedUser() && isValidId(settingId) && isValidSiteSettings(incoming()) && isAdmin()
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'businessName', 'tagline', 'phoneDisplay', 'email', 'hoursShort',
+          'hourlyRate', 'dispatchPolicyNote', 'warrantyDays', 'announcement',
+          'googlePlaceId', 'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+
+    match /services/{serviceId} {
+      allow get: if isValidId(serviceId);
+      allow list: if true;
+      allow create: if isVerifiedUser() && isValidId(serviceId)
+        && isValidServicePackage(incoming())
+        && incoming().id == serviceId
+        && isAdmin();
+      allow update: if isVerifiedUser() && isValidId(serviceId)
+        && isValidServicePackage(incoming())
+        && incoming().id == existing().id
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'index', 'title', 'shortLabel', 'category', 'categoryLabel',
+          'pricingType', 'price', 'durationMinutes', 'mode', 'summary',
+          'includes', 'featuredTone', 'active', 'sortOrder', 'updatedAt'
+        ])
+        && isAdmin();
+      allow delete: if isVerifiedUser() && isValidId(serviceId) && isAdmin();
+    }
+
+    match /bookings/{bookingId} {
+      // Strictly Admin-only read/list for PII protection
+      allow get: if isValidId(bookingId) && isAdmin();
+      allow list: if isAdmin();
+
+      // Public customers may create a new booking with strict schema & state lock (no zone fields)
+      allow create: if isValidId(bookingId)
+        && isValidBookingBase(incoming())
+        && !('zoneId' in incoming())
+        && !('zoneName' in incoming())
+        && incoming().status == 'new'
+        && incoming().adminNotes == ''
+        && incoming().createdAt == request.time;
+
+      // Strictly Admin-only update with immutable referenceId/createdAt & explicit allowlist
+      allow update: if isVerifiedUser() && isValidId(bookingId)
+        && isValidBookingBase(incoming())
+        && incoming().referenceId == existing().referenceId
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'riderName', 'contactEmail', 'contactPhone', 'scooterModel', 'address',
+          'preferredDay', 'preferredWindow',
+          'serviceIds', 'serviceTitles', 'estimatedLaborLabel', 'estimatedMinutes',
+          'notes', 'adminNotes', 'status', 'updatedAt'
+        ])
+        && isAdmin();
+
+      allow delete: if isVerifiedUser() && isValidId(bookingId) && isAdmin();
+    }
+
+    match /customers/{customerId} {
+      allow get: if isValidId(customerId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isVerifiedUser() && isValidId(customerId) && isValidCustomerProfile(incoming()) && isAdmin();
+      allow update: if isVerifiedUser() && isValidId(customerId) && isValidCustomerProfile(incoming()) && isAdmin()
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'email', 'phone', 'address', 'scooterModel',
+          'serialNumber', 'mechanicNotes', 'updatedAt'
+        ]);
+      allow delete: if isVerifiedUser() && isValidId(customerId) && isAdmin();
+    }
+
+    match /admins/{uid} {
+      allow get: if isValidId(uid) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isBootstrappedAdmin() && isValidId(uid) && isValidAdminUser(incoming());
+      allow update: if false;
+      allow delete: if isBootstrappedAdmin() && isValidId(uid);
+    }
+  }
+}
