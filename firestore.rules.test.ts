@@ -72,4 +72,11 @@ test('Dirty Dozen security invariants are enforced in Firestore rules', () => {
   assert.ok(rules.includes("'ongoing'"));
   assert.ok(rules.includes("'bookingDate'"));
   assert.ok(rules.includes("function isValidDateKey("));
+
+  // 14. Admin-managed codeSnippets collection enforces strict schema and verified admin-only writes
+  assert.ok(rules.includes('function isValidCodeSnippet('));
+  assert.match(rules, /match \/codeSnippets\/\{snippetId\}[\s\S]*allow create: if isVerifiedUser\(\) && isValidId\(snippetId\)[\s\S]*isValidCodeSnippet\(incoming\(\)\)[\s\S]*isAdmin\(\);/);
+  assert.match(rules, /match \/codeSnippets\/\{snippetId\}[\s\S]*allow update: if isVerifiedUser\(\) && isValidId\(snippetId\)[\s\S]*isValidCodeSnippet\(incoming\(\)\)[\s\S]*affectedKeys\(\)\.hasOnly\([\s\S]*isAdmin\(\);/);
+  assert.match(rules, /match \/codeSnippets\/\{snippetId\}[\s\S]*allow delete: if isVerifiedUser\(\) && isValidId\(snippetId\) && isAdmin\(\);/);
 });
+

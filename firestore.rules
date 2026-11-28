@@ -264,6 +264,23 @@ service cloud.firestore {
         && data.updatedAt == request.time;
     }
 
+    function isValidCodeSnippet(data) {
+      return data.keys().hasAll([
+          'id', 'name', 'placement', 'code', 'enabled', 'sortOrder', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'name', 'placement', 'code', 'enabled', 'sortOrder', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && data.id.size() >= 2 && data.id.size() <= 64
+        && isNonEmptyString(data.name, 2, 100)
+        && data.placement in ['reviews_section', 'head', 'body_end', 'home_section', 'booking_section']
+        && isOptionalString(data.code, 10000)
+        && data.enabled is bool
+        && data.sortOrder is number && data.sortOrder >= 0 && data.sortOrder <= 1000
+        && data.updatedAt == request.time;
+    }
+
     function isValidAdminUser(data) {
       return data.keys().hasAll(['email', 'role', 'createdAt'])
         && data.keys().hasOnly(['email', 'role', 'createdAt'])
@@ -402,6 +419,23 @@ service cloud.firestore {
           'serialNumber', 'mechanicNotes', 'updatedAt'
         ]);
       allow delete: if isVerifiedUser() && isValidId(customerId) && isAdmin();
+    }
+
+    match /codeSnippets/{snippetId} {
+      allow get: if isValidId(snippetId);
+      allow list: if true;
+      allow create: if isVerifiedUser() && isValidId(snippetId)
+        && isValidCodeSnippet(incoming())
+        && incoming().id == snippetId
+        && isAdmin();
+      allow update: if isVerifiedUser() && isValidId(snippetId)
+        && isValidCodeSnippet(incoming())
+        && incoming().id == existing().id
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'placement', 'code', 'enabled', 'sortOrder', 'updatedAt'
+        ])
+        && isAdmin();
+      allow delete: if isVerifiedUser() && isValidId(snippetId) && isAdmin();
     }
 
     match /admins/{uid} {

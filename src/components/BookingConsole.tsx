@@ -3,6 +3,7 @@ import { onAuthStateChanged, type User } from 'firebase/auth';
 import { Check, CheckCircle2, Loader2, MessageSquare, RotateCcw, UserCircle2 } from 'lucide-react';
 import {
   TIME_WINDOWS,
+  type CodeSnippetRecord,
   type OperatingDay,
   type ScooterService,
   type SiteSettings,
@@ -11,6 +12,8 @@ import {
 import { auth } from '../lib/firebase';
 import { createPublicBooking, subscribeUserAccount } from '../services/firestoreService';
 import type { AppRoute } from '../types/routes';
+import { getEnabledSnippetsForPlacement } from '../utils/codeSnippets';
+import { CodeSnippetMount } from './CodeSnippetMount';
 import {
   formatCurrency,
   formatDuration,
@@ -49,6 +52,7 @@ export interface ConfirmedBooking {
 interface BookingConsoleProps {
   services: ScooterService[];
   settings: SiteSettings;
+  codeSnippets?: CodeSnippetRecord[];
   selectedServiceIds: string[];
   estimate: RepairEstimate;
   confirmedBooking: ConfirmedBooking | null;
@@ -61,6 +65,7 @@ interface BookingConsoleProps {
 export function BookingConsole({
   services,
   settings,
+  codeSnippets = [],
   selectedServiceIds,
   estimate,
   confirmedBooking,
@@ -69,6 +74,7 @@ export function BookingConsole({
   onResetBooking,
   onNavigate,
 }: BookingConsoleProps) {
+  const bookingSnippets = getEnabledSnippetsForPlacement(codeSnippets, 'booking_section');
   const upcomingDates = getUpcomingOperatingDates(6);
   const todayDateKey = getTodayPacificDateKey();
 
@@ -789,6 +795,19 @@ export function BookingConsole({
                 </p>
               </div>
             </aside>
+          </div>
+        )}
+
+        {bookingSnippets.length > 0 && (
+          <div className="rounded-[22px] bg-[#131316] border border-white/10 p-5 sm:p-7 space-y-5">
+            {bookingSnippets.map((snippet) => (
+              <CodeSnippetMount
+                key={snippet.id}
+                snippet={snippet}
+                dockFloatingWidgets
+                surface="dark"
+              />
+            ))}
           </div>
         )}
       </div>

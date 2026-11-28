@@ -7,15 +7,23 @@ import { RiderProof } from './components/RiderProof';
 import { BookingConsole, type ConfirmedBooking } from './components/BookingConsole';
 import { PolicyPages } from './components/PolicyPages';
 import { AdminConsole } from './components/AdminConsole';
+import { AssistantWidget } from './components/AssistantWidget';
 import { CustomerAccountPortal } from './components/CustomerAccountPortal';
 import { Footer } from './components/Footer';
+import { GlobalSnippetsHost } from './components/GlobalSnippetsHost';
 import {
+  DEFAULT_CODE_SNIPPETS,
   DEFAULT_SITE_SETTINGS,
   SCOOTER_SERVICES,
+  type CodeSnippetRecord,
   type ScooterService,
   type SiteSettings,
 } from './data/scooterData';
-import { subscribeServices, subscribeSiteSettings } from './services/firestoreService';
+import {
+  subscribeCodeSnippets,
+  subscribeServices,
+  subscribeSiteSettings,
+} from './services/firestoreService';
 import { normalizeRoute, type AppRoute } from './types/routes';
 import { calculateRepairEstimate } from './utils/repairCalculator';
 
@@ -40,6 +48,8 @@ export default function App() {
   );
   const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
   const [services, setServices] = useState<ScooterService[]>(SCOOTER_SERVICES);
+  const [codeSnippets, setCodeSnippets] = useState<CodeSnippetRecord[]>(DEFAULT_CODE_SNIPPETS);
+  const [codeSnippetsFromFirestore, setCodeSnippetsFromFirestore] = useState(false);
   const [quotaExceeded, setQuotaExceeded] = useState(false);
 
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>(() =>
@@ -66,13 +76,18 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  // Subscribe to public Firestore SiteSettings & Services so admin edits reflect live
+  // Subscribe to public Firestore SiteSettings, Services & Code Snippets so admin edits reflect live
   useEffect(() => {
     const unsubSettings = subscribeSiteSettings(setSettings);
     const unsubServices = subscribeServices(setServices);
+    const unsubSnippets = subscribeCodeSnippets((nextSnippets, fromFirestore) => {
+      setCodeSnippets(nextSnippets);
+      setCodeSnippetsFromFirestore(fromFirestore);
+    });
     return () => {
       unsubSettings();
       unsubServices();
+      unsubSnippets();
     };
   }, []);
 
@@ -119,6 +134,8 @@ export default function App() {
 
   const appShell = (
     <div id="top" className="min-h-screen flex flex-col bg-[#09090B] text-[#F4F4F0]">
+      <GlobalSnippetsHost snippets={codeSnippets} currentRoute={currentRoute} />
+
       {quotaExceeded && (
         <div className="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50 shadow-sm">
           <span>
@@ -154,6 +171,7 @@ export default function App() {
           <HomePage
             services={services}
             settings={settings}
+            codeSnippets={codeSnippets}
             selectedServiceIds={selectedServiceIds}
             onToggleService={handleToggleService}
             onNavigate={navigate}
@@ -174,7 +192,7 @@ export default function App() {
         {currentRoute === '/reviews' && (
           <RiderProof
             settings={settings}
-            hasMapsApiKey={hasMapsApiKey}
+            codeSnippets={codeSnippets}
             onNavigate={navigate}
           />
         )}
@@ -183,6 +201,7 @@ export default function App() {
           <BookingConsole
             services={services}
             settings={settings}
+            codeSnippets={codeSnippets}
             selectedServiceIds={selectedServiceIds}
             estimate={estimate}
             confirmedBooking={confirmedBooking}
@@ -208,11 +227,24 @@ export default function App() {
         )}
 
         {currentRoute === '/admin' && (
-          <AdminConsole services={services} settings={settings} onNavigate={navigate} />
+          <AdminConsole
+            services={services}
+            settings={settings}
+            codeSnippets={codeSnippets}
+            codeSnippetsFromFirestore={codeSnippetsFromFirestore}
+            onNavigate={navigate}
+          />
         )}
       </main>
 
       <Footer settings={settings} onNavigate={navigate} />
+
+      <AssistantWidget
+        services={services}
+        settings={settings}
+        currentRoute={currentRoute}
+        onNavigate={navigate}
+      />
     </div>
   );
 

@@ -197,6 +197,24 @@
         "createdAt"
       ]
     },
+    "CodeSnippet": {
+      "title": "CodeSnippet",
+      "description": "Admin-managed reusable HTML/script embed snippet mounted in a chosen site placement.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 2, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "placement": {
+          "type": "string",
+          "enum": ["reviews_section", "head", "body_end", "home_section", "booking_section"]
+        },
+        "code": { "type": "string", "maxLength": 10000 },
+        "enabled": { "type": "boolean" },
+        "sortOrder": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "placement", "code", "enabled", "sortOrder", "updatedAt"]
+    },
     "AdminUser": {
       "title": "AdminUser",
       "description": "Trusted admin role directory document keyed by Firebase Auth UID.",
@@ -233,6 +251,10 @@
     "/customers/{customerId}": {
       "schema": { "$ref": "#/entities/CustomerProfile" },
       "description": "Private customer CRM profiles strictly restricted to verified admins."
+    },
+    "/codeSnippets/{snippetId}": {
+      "schema": { "$ref": "#/entities/CodeSnippet" },
+      "description": "Publicly readable, strictly admin-writable embed and script snippets rendered on configured site placements."
     },
     "/admins/{uid}": {
       "schema": { "$ref": "#/entities/AdminUser" },

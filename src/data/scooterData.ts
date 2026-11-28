@@ -132,6 +132,23 @@ export interface CustomerProfileRecord {
   updatedAtIso: string;
 }
 
+export type CodeSnippetPlacement =
+  | 'reviews_section'
+  | 'head'
+  | 'body_end'
+  | 'home_section'
+  | 'booking_section';
+
+export interface CodeSnippetRecord {
+  id: string;
+  name: string;
+  placement: CodeSnippetPlacement;
+  code: string;
+  enabled: boolean;
+  sortOrder: number;
+  updatedAtIso: string;
+}
+
 export const OPERATING_DAYS = ['Monday', 'Friday', 'Saturday', 'Sunday'] as const;
 export type OperatingDay = (typeof OPERATING_DAYS)[number];
 
@@ -225,6 +242,18 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
     'Rain City Scooter collects only information reasonably required to schedule mobile visits, perform safe repairs, maintain warranty records, and communicate with you:',
   footerNote: '',
 };
+
+export const DEFAULT_CODE_SNIPPETS: CodeSnippetRecord[] = [
+  {
+    id: 'google-reviews-trustindex',
+    name: 'Google Reviews Widget (Trustindex)',
+    placement: 'reviews_section',
+    code: "<script defer async src='https://cdn.trustindex.io/loader.js?630546f86466713ee556f97ca06'></script>",
+    enabled: true,
+    sortOrder: 1,
+    updatedAtIso: '',
+  },
+];
 
 /**
  * Official pricing catalog matching https://raincityscooter.com/pricing/

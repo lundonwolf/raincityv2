@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { ExternalLink, Eye, RotateCcw, Save } from 'lucide-react';
+import { Code2, ExternalLink, Eye, RotateCcw, Save } from 'lucide-react';
 import { DEFAULT_SITE_SETTINGS, type SiteSettings } from '../data/scooterData';
 import type { AppRoute } from '../types/routes';
 
@@ -16,6 +16,7 @@ interface AdminSiteEditorProps {
   saving: boolean;
   onSave: (nextSettings: SiteSettings) => Promise<void>;
   onNavigate: (route: AppRoute) => void;
+  onOpenCodeSnippets?: () => void;
 }
 
 const SECTION_TABS: {
@@ -45,6 +46,7 @@ export function AdminSiteEditor({
   saving,
   onSave,
   onNavigate,
+  onOpenCodeSnippets,
 }: AdminSiteEditorProps) {
   const [section, setSection] = useState<SiteEditorSection>('global');
   const [draft, setDraft] = useState<SiteSettings>(settings);
@@ -535,6 +537,28 @@ export function AdminSiteEditor({
       {/* SECTION 4: REVIEWS & BRANDS */}
       {section === 'reviews' && (
         <div className="space-y-4">
+          {onOpenCodeSnippets && (
+            <div className="rounded-[14px] bg-white border border-black/10 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <div className="font-mono text-[11px] font-semibold text-[#52525B]">
+                  LIVE GOOGLE REVIEWS EMBED SCRIPT
+                </div>
+                <p className="text-xs text-[#3F3F46] leading-relaxed">
+                  Swap your Trustindex reviews code snippet or add other widgets anytime in the{' '}
+                  <strong>Code Snippets</strong> tab.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onOpenCodeSnippets}
+                className="min-h-[38px] px-3.5 py-2 rounded-[10px] bg-[#121214] hover:bg-[#27272A] text-[#F4F4F0] text-xs font-semibold inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
+              >
+                <Code2 className="w-3.5 h-3.5" aria-hidden="true" />
+                Edit Reviews Code Snippet
+              </button>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="space-y-1">
               <label htmlFor="edit-reviews-headline" className="text-xs font-semibold">

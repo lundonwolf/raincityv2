@@ -1,10 +1,18 @@
+import 'dotenv/config';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import type { Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
+import {
+  attachLiveVoiceWebSocket,
+  parseChatRequestBody,
+  streamScooterChat,
+} from './server/geminiAssistant';
+import { formatGeminiErrorMessage } from './src/utils/assistantUtils';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -126,6 +134,56 @@ async function startServer() {
     res.json({ ok: true, mailProvider: 'mock-mail-service' });
   });
 
+  // Assistant capabilities metadata
+  app.get('/api/assistant/status', (_req: Request, res: Response) => {
+    res.json({
+      ok: true,
+      chatModels: ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'],
+      liveModel: 'gemini-3.8-live',
+    });
+  });
+
+  // Multi-turn Gemini Chatbot (Server-Sent Events streaming)
+  app.post('/api/assistant/chat', async (req: Request, res: Response) => {
+    const parsed = parseChatRequestBody(req.body);
+    if (parsed.messages.length === 0) {
+      res.status(400).json({ ok: false, error: 'Please enter a message to start chatting.' });
+      return;
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    let clientDisconnected = false;
+    res.on('close', () => {
+      if (!res.writableEnded) {
+        clientDisconnected = true;
+      }
+    });
+
+    const writeEvent = (payload: Record<string, unknown>) => {
+      if (!clientDisconnected && !res.writableEnded) {
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      }
+    };
+
+    try {
+      await streamScooterChat(parsed, (delta) => {
+        writeEvent({ delta });
+      });
+      writeEvent({ done: true, model: parsed.model });
+    } catch (err) {
+      const rawMessage = err instanceof Error ? err.message : String(err);
+      writeEvent({ error: formatGeminiErrorMessage(rawMessage) });
+    } finally {
+      if (!res.writableEnded) {
+        res.end();
+      }
+    }
+  });
+
   // Protected Admin API: Trigger confirmation email via mock mail service
   app.post('/api/send-confirmation', async (req: Request, res: Response) => {
     const adminUser = await verifyAdminIdToken(req.headers.authorization);
@@ -223,7 +281,10 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const httpServer = http.createServer(app);
+  attachLiveVoiceWebSocket(httpServer);
+
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.info(`Rain City Scooter server listening on http://0.0.0.0:${PORT}`);
   });
 }

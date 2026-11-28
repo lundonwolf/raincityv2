@@ -16,12 +16,15 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import {
+  DEFAULT_CODE_SNIPPETS,
   DEFAULT_SITE_SETTINGS,
   SCOOTER_SERVICES,
   type BookingMessageRecord,
   type BookingMessageType,
   type BookingRecord,
   type BookingStatus,
+  type CodeSnippetPlacement,
+  type CodeSnippetRecord,
   type CustomerProfileRecord,
   type OperatingDay,
   type ScooterService,
@@ -31,6 +34,7 @@ import {
 } from '../data/scooterData';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { isValidDateKey } from '../utils/bookingDates';
+import { isValidSnippetPlacement } from '../utils/codeSnippets';
 
 function trimStr(value: string, maxLen: number): string {
   return value.trim().slice(0, maxLen);
@@ -862,3 +866,77 @@ export async function checkIsAdminDocument(uid: string): Promise<boolean> {
     return false;
   }
 }
+
+export function subscribeCodeSnippets(
+  onData: (snippets: CodeSnippetRecord[], fromFirestore: boolean) => void,
+): Unsubscribe {
+  const q = query(collection(db, 'codeSnippets'), orderBy('sortOrder', 'asc'));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      if (snapshot.empty) {
+        onData(DEFAULT_CODE_SNIPPETS, false);
+        return;
+      }
+      const list: CodeSnippetRecord[] = snapshot.docs.map((docSnap, idx) => {
+        const d = docSnap.data();
+        const placement: CodeSnippetPlacement = isValidSnippetPlacement(d.placement)
+          ? d.placement
+          : 'reviews_section';
+        return {
+          id: String(d.id ?? docSnap.id),
+          name: String(d.name ?? 'Custom Snippet'),
+          placement,
+          code: String(d.code ?? ''),
+          enabled: d.enabled !== false,
+          sortOrder: typeof d.sortOrder === 'number' ? d.sortOrder : idx + 1,
+          updatedAtIso: toIsoString(d.updatedAt),
+        };
+      });
+      onData(list, true);
+    },
+    (error) => {
+      console.warn('CodeSnippets listener fallback:', error.message);
+      onData(DEFAULT_CODE_SNIPPETS, false);
+    },
+  );
+}
+
+export async function saveCodeSnippet(
+  snippet: Omit<CodeSnippetRecord, 'updatedAtIso'>,
+): Promise<void> {
+  const safeId = snippet.id
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+  const finalId = safeId.length >= 2 ? safeId : `snippet-${Date.now().toString().slice(-5)}`;
+  const path = `codeSnippets/${finalId}`;
+  const placement: CodeSnippetPlacement = isValidSnippetPlacement(snippet.placement)
+    ? snippet.placement
+    : 'reviews_section';
+
+  try {
+    await setDoc(doc(db, 'codeSnippets', finalId), {
+      id: finalId,
+      name: trimStr(snippet.name || 'Custom Snippet', 100),
+      placement,
+      code: snippet.code.trim().slice(0, 10000),
+      enabled: Boolean(snippet.enabled),
+      sortOrder: Math.max(0, Math.min(1000, Math.round(Number(snippet.sortOrder) || 0))),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteCodeSnippet(snippetId: string): Promise<void> {
+  const path = `codeSnippets/${snippetId}`;
+  try {
+    await deleteDoc(doc(db, 'codeSnippets', snippetId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+

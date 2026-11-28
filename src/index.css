@@ -83,6 +83,22 @@
     0 1px 0 rgba(255, 255, 255, 0.75);
 }
 
+/* Dock Trustindex floating review widgets cleanly inside the Reviews section */
+.trustindex-docked .ti-widget {
+  position: static !important;
+  inset: auto !important;
+  transform: none !important;
+  margin: 0 auto !important;
+  z-index: auto !important;
+  max-width: 100% !important;
+}
+
+.trustindex-docked .ti-close,
+.trustindex-docked .ti-close-lg,
+.trustindex-docked [class*="ti-close"] {
+  display: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -93,3 +109,4 @@
     scroll-behavior: auto !important;
   }
 }
+

@@ -1,6 +1,6 @@
 {
   "name": "Rain City Scooter",
   "description": "Mobile electric scooter diagnostics, tire, brake, electrical, and battery repair dispatched across Seattle and Puget Sound.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

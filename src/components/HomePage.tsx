@@ -1,13 +1,16 @@
 import { ArrowRight } from 'lucide-react';
-import type { ScooterService, SiteSettings } from '../data/scooterData';
+import type { CodeSnippetRecord, ScooterService, SiteSettings } from '../data/scooterData';
 import type { AppRoute } from '../types/routes';
+import { getEnabledSnippetsForPlacement } from '../utils/codeSnippets';
 import { ClockWidget } from './ClockWidget';
 import { CockpitDeck } from './CockpitDeck';
+import { CodeSnippetMount } from './CodeSnippetMount';
 import { SafeImage } from './SafeImage';
 
 interface HomePageProps {
   services: ScooterService[];
   settings: SiteSettings;
+  codeSnippets?: CodeSnippetRecord[];
   selectedServiceIds: string[];
   onToggleService: (serviceId: string) => void;
   onNavigate: (route: AppRoute) => void;
@@ -62,10 +65,13 @@ const PAGE_DIRECTORY: {
 export function HomePage({
   services,
   settings,
+  codeSnippets = [],
   selectedServiceIds,
   onToggleService,
   onNavigate,
 }: HomePageProps) {
+  const homeSnippets = getEnabledSnippetsForPlacement(codeSnippets, 'home_section');
+
   return (
     <section className="pt-10 pb-20 sm:pt-14 sm:pb-24">
       <div className="max-w-[1280px] mx-auto px-5 sm:px-8 space-y-10">
@@ -142,6 +148,20 @@ export function HomePage({
             </div>
           </div>
         </div>
+
+        {/* Custom Home Page Code Snippets (if any enabled) */}
+        {homeSnippets.length > 0 && (
+          <div className="rounded-[22px] bg-[#131316] border border-white/10 p-5 sm:p-7 space-y-5">
+            {homeSnippets.map((snippet) => (
+              <CodeSnippetMount
+                key={snippet.id}
+                snippet={snippet}
+                dockFloatingWidgets
+                surface="dark"
+              />
+            ))}
+          </div>
+        )}
 
         {/* Dedicated Page Launchpad Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 pt-2">

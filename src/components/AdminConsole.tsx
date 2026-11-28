@@ -3,6 +3,7 @@ import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebas
 import {
   Calendar,
   Check,
+  Code2,
   Loader2,
   LogOut,
   MessageSquare,
@@ -21,6 +22,7 @@ import {
   TIME_WINDOWS,
   type BookingRecord,
   type BookingStatus,
+  type CodeSnippetRecord,
   type CustomerProfileRecord,
   type OperatingDay,
   type PricingType,
@@ -35,9 +37,11 @@ import {
   deleteAdminBooking,
   deleteAdminBookingsBulk,
   deleteAdminCustomer,
+  deleteCodeSnippet,
   deleteServiceItem,
   markBookingConfirmationSent,
   saveAdminCustomer,
+  saveCodeSnippet,
   saveServiceItem,
   saveSiteSettings,
   seedDefaultServicesToFirestore,
@@ -61,6 +65,7 @@ import {
 } from '../utils/repairCalculator';
 import { AdminAnalyticsPanel } from './AdminAnalyticsPanel';
 import { AdminCalendarPanel } from './AdminCalendarPanel';
+import { AdminCodeSnippetsPanel } from './AdminCodeSnippetsPanel';
 import { AdminImportPanel } from './AdminImportPanel';
 import { AdminSiteEditor } from './AdminSiteEditor';
 import { BookingConfirmationModal } from './BookingConfirmationModal';
@@ -69,10 +74,12 @@ import { BookingMessagesPanel } from './BookingMessagesPanel';
 interface AdminConsoleProps {
   services: ScooterService[];
   settings: SiteSettings;
+  codeSnippets: CodeSnippetRecord[];
+  codeSnippetsFromFirestore: boolean;
   onNavigate: (route: AppRoute) => void;
 }
 
-type AdminTab = 'bookings' | 'calendar' | 'analytics' | 'customers' | 'site' | 'import';
+type AdminTab = 'bookings' | 'calendar' | 'analytics' | 'customers' | 'site' | 'snippets' | 'import';
 
 const BOOKING_STATUSES: BookingStatus[] = [
   'new',
@@ -92,7 +99,13 @@ const STATUS_LABELS: Record<BookingStatus, string> = {
   cancelled: 'Cancelled',
 };
 
-export function AdminConsole({ services, settings, onNavigate }: AdminConsoleProps) {
+export function AdminConsole({
+  services,
+  settings,
+  codeSnippets,
+  codeSnippetsFromFirestore,
+  onNavigate,
+}: AdminConsoleProps) {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -891,6 +904,7 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                   { id: 'analytics', label: 'Analytics' },
                   { id: 'customers', label: `Customers (${aggregatedCustomers.length})` },
                   { id: 'site', label: 'Site Editor & Pricing' },
+                  { id: 'snippets', label: `Code Snippets (${codeSnippets.length})` },
                   { id: 'import', label: 'Import Data' },
                 ] as { id: AdminTab; label: string }[]
               ).map((tab) => (
@@ -907,6 +921,7 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
                   }`}
                 >
                   {tab.id === 'calendar' && <Calendar className="w-3.5 h-3.5" aria-hidden="true" />}
+                  {tab.id === 'snippets' && <Code2 className="w-3.5 h-3.5" aria-hidden="true" />}
                   {tab.label}
                 </button>
               ))}
@@ -2234,6 +2249,7 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
               saving={savingSettings}
               onSave={handleSaveSiteSettings}
               onNavigate={onNavigate}
+              onOpenCodeSnippets={() => setActiveTab('snippets')}
             />
 
             {/* Live Pricing Catalog Editor */}
@@ -2777,7 +2793,24 @@ export function AdminConsole({ services, settings, onNavigate }: AdminConsolePro
           </div>
         )}
 
-        {/* TAB 5: REPLIT POSTGRESQL DATA IMPORTER */}
+        {/* TAB 5: CODE SNIPPETS & EMBED MANAGER */}
+        {activeTab === 'snippets' && (
+          <AdminCodeSnippetsPanel
+            snippets={codeSnippets}
+            isFromFirestore={codeSnippetsFromFirestore}
+            onSaveSnippet={async (snippet) => {
+              await saveCodeSnippet(snippet);
+              showToast(`Saved snippet "${snippet.name}" live.`);
+            }}
+            onDeleteSnippet={async (snippetId) => {
+              await deleteCodeSnippet(snippetId);
+              showToast('Deleted code snippet.');
+            }}
+            onNavigate={onNavigate}
+          />
+        )}
+
+        {/* TAB 6: REPLIT POSTGRESQL DATA IMPORTER */}
         {activeTab === 'import' && (
           <AdminImportPanel
             services={services}
