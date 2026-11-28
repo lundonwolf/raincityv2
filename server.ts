@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -13,6 +13,9 @@ import {
   streamScooterChat,
 } from './server/geminiAssistant';
 import { formatGeminiErrorMessage } from './src/utils/assistantUtils';
+
+dotenv.config({ path: '.env' });
+dotenv.config({ path: '.env.production' });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

@@ -1,22 +1,74 @@
 # Deploying Rain City Scooter to aaPanel
 
-This guide walks step by step through moving the Rain City Scooter web app from this GitHub repository onto a Linux server managed by **aaPanel** (using **Nginx** or **Apache**).
+This guide walks step by step through running Rain City Scooter on a Linux server managed by **aaPanel** (using **Nginx** + **Node.js**).
 
-Because this application is a static **React + Vite** single-page app backed directly by **Firebase (Firestore + Google Auth)** and **Google Maps Platform (Places API New)**, you do **not** need a running Node.js background server in production—Node.js is only used during the build step (`npm run build`), and Nginx serves the compiled `dist/` folder directly at full static speed.
+- **Static frontend (`dist/`)**: Served by Nginx (or Express in production mode).
+- **Node.js API server (`server.ts` on port `3000`)**: Required for the **Ask Mechanic** Gemini chatbot (`POST /api/assistant/chat`) and **Live Voice** WebSocket bridge (`wss://<your-domain>/api/live`). Without this running and proxied through Nginx, `/api/assistant/chat` returns **HTTP 405 Method Not Allowed**.
+
+---
+
+## Quick Fix for HTTP 405 on Your Existing aaPanel Site
+
+If your site is already live on aaPanel serving `/dist` and you see `Assistant request failed (405)`:
+
+1. **Add your Gemini API key** to `/www/wwwroot/raincityscooter.com/.env` (or `.env.production`):
+   ```env
+   GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
+   NODE_ENV="production"
+   PORT="3000"
+   ```
+2. **Pull latest code, install, and build** in `/www/wwwroot/raincityscooter.com`:
+   ```bash
+   cd /www/wwwroot/raincityscooter.com
+   git pull origin main
+   npm install --cache /tmp/.npm
+   npm run build
+   ```
+3. **Start the Node backend in aaPanel** (aaPanel → **Website → Node Project → Add Node Project**):
+   - **Project Directory:** `/www/wwwroot/raincityscooter.com`
+   - **Run opt:** Custom command → `npx tsx server.ts`
+   - **Port:** `3000`
+   - **Node version:** `v20+` or `v22+`
+   - *(Alternatively via PM2 in Terminal: `NODE_ENV=production pm2 start "npx tsx server.ts" --name raincityscooter-api && pm2 save`)*
+4. **Proxy `/api/` (including SSE streaming & Live Voice WebSockets) in Nginx**:
+   Open **aaPanel → Website → `raincityscooter.com` → Settings → Config**, and add these two blocks **above** `location / {`:
+
+   ```nginx
+   # Gemini Chatbot (SSE streaming) & API endpoints
+   location /api/ {
+       proxy_pass http://127.0.0.1:3000;
+       proxy_http_version 1.1;
+       proxy_set_header Host $host;
+       proxy_set_header X-Real-IP $remote_addr;
+       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+       proxy_set_header X-Forwarded-Proto $scheme;
+
+       # Required for WebSockets (/api/live)
+       proxy_set_header Upgrade $http_upgrade;
+       proxy_set_header Connection "upgrade";
+
+       # Required so chat responses stream immediately instead of buffering
+       proxy_buffering off;
+       proxy_cache off;
+       proxy_read_timeout 300s;
+   }
+   ```
+   Click **Save** to reload Nginx.
+5. **Verify**: Run `curl http://127.0.0.1:3000/api/assistant/status` on the server (should return `{"ok":true,...}`), then test **Ask Mechanic** on your live domain.
 
 ---
 
 ## Prerequisites
 
-Before you start, make sure you have:
+Before you start from scratch, make sure you have:
 
-1. **aaPanel installed** on your VPS/server with **Nginx** (recommended) or **Apache**.
+1. **aaPanel installed** on your VPS/server with **Nginx** (recommended).
 2. **A domain name** pointed to your server's IP address via DNS `A` records (e.g., `raincityscooter.com` and `www.raincityscooter.com`).
 3. **Git** installed on your server (`git --version`).
 4. **Node.js v20+ (LTS)** installed via aaPanel:
    - Open aaPanel → **App Store** → search for **Node Version Manager** → install it.
    - Open **Node Version Manager** → install **Node.js 20.x** or **22.x** and set it as the default CLI version.
-5. **Firebase project access** (your existing Firestore database and Authentication project) and a **Google Cloud API key** for Google Maps Platform.
+5. **Firebase project access** (your existing Firestore database and Authentication project), a **Gemini API key** (for the Ask Mechanic chatbot & Live Voice), and a **Google Cloud API key** for Google Maps Platform.
 
 ---
 
@@ -48,9 +100,12 @@ Create a `.env.production` file in `/www/wwwroot/raincityscooter.com` (this file
 nano /www/wwwroot/raincityscooter.com/.env.production
 ```
 
-Add your Google Maps Platform API key:
+Add your server-side Gemini API key and Google Maps key:
 
 ```env
+GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
+NODE_ENV="production"
+PORT="3000"
 VITE_GOOGLE_MAPS_API_KEY="YOUR_PRODUCTION_GOOGLE_MAPS_API_KEY"
 ```
 
@@ -89,11 +144,11 @@ When the build completes, Vite creates `/www/wwwroot/raincityscooter.com/dist/` 
 - `src/assets/images/` (studio imagery copied automatically by `vite.config.ts`)
 - `assets/aistudio/` (public static media)
 
-> **Important:** Vite injects `VITE_GOOGLE_MAPS_API_KEY` at **build time**. If you ever update `.env.production`, run `npm run build` again.
+> **Important:** Vite injects `VITE_GOOGLE_MAPS_API_KEY` at **build time**. If you ever update `VITE_GOOGLE_MAPS_API_KEY` in `.env.production`, run `npm run build` again. If you update `GEMINI_API_KEY`, restart the Node.js process (`server.ts`).
 
 ---
 
-## Step 4: Create the Website in aaPanel
+## Step 4: Create the Website & Node Backend in aaPanel
 
 1. Log in to **aaPanel** → click **Website** in the left sidebar → select the **PHP Project** (or **HTML/Static**) tab → click **Add site**.
 2. Fill in the site settings:
@@ -113,13 +168,22 @@ When the build completes, Vite creates `/www/wwwroot/raincityscooter.com/dist/` 
 1. In **aaPanel → Website**, click **Settings** (or your domain name) next to `raincityscooter.com`.
 2. Open the **Site directory** tab.
 3. Change **Running directory** from `/` to `/dist` and click **Save**.
-4. *(Optional)* If aaPanel warns about `Anti-XSS attack (open_basedir)`, you can leave it off since this is a pure static site with no PHP runtime.
+4. *(Optional)* If aaPanel warns about `Anti-XSS attack (open_basedir)`, you can leave it off since this site uses no PHP runtime.
+
+### Start the Node.js Backend (`server.ts`) for Gemini Chat & Live Voice
+
+1. In **aaPanel → Website → Node Project**, click **Add Node Project**:
+   - **Project Directory:** `/www/wwwroot/raincityscooter.com`
+   - **Run opt:** Custom → `npx tsx server.ts`
+   - **Port:** `3000`
+   - **Node version:** Node 20.x or 22.x
+2. Start the project and verify it shows **Running**.
 
 ---
 
-## Step 5: Configure SPA Routing (Required for Multi-Page URLs)
+## Step 5: Configure SPA Routing & `/api/` Reverse Proxy
 
-Rain City Scooter uses client-side routing for `/pricing`, `/reviews`, `/book`, `/warranty`, `/terms`, `/privacy`, and `/admin`. Without a fallback rewrite rule, refreshing any of those pages directly will return an HTTP `404`.
+Rain City Scooter uses client-side routing for `/pricing`, `/reviews`, `/book`, `/warranty`, `/terms`, `/privacy`, and `/admin`, plus Node.js API & WebSocket routes under `/api/`.
 
 ### Option A: Nginx (Recommended in aaPanel)
 
@@ -132,11 +196,26 @@ location / {
 }
 ```
 
-3. Open the **Config** tab in the same site settings modal and add optimal caching + popup auth headers inside your `server { ... }` block (right above the `include` for rewrite rules):
+3. Open the **Config** tab in the same site settings modal and add the `/api/` reverse proxy (with SSE streaming + WebSocket headers) and caching headers inside your `server { ... }` block (right above the `include` for rewrite rules):
 
 ```nginx
 # Allow Firebase Google Sign-In popup on /admin to communicate cleanly
 add_header Cross-Origin-Opener-Policy "same-origin-allow-popups" always;
+
+# Reverse-proxy Gemini Chatbot (/api/assistant/chat) and Live Voice WebSocket (/api/live)
+location /api/ {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 300s;
+}
 
 # Never cache index.html so new deployments appear immediately
 location = /index.html {
